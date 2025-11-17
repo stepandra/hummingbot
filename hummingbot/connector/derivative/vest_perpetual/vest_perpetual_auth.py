@@ -35,11 +35,30 @@ class VestPerpetualAuth(AuthBase):
             parsed = urlparse(request.url)
             path = parsed.path or ""
 
+            data_dict = self._ensure_json_dict(request.data)
+            order = data_dict.get("order") or {}
+
             # Sign order placement requests: POST /orders
-            if path.endswith("/orders"):
-                data_dict = self._ensure_json_dict(request.data)
-                order = data_dict.get("order") or {}
+            if path.endswith("/orders") and not path.endswith("/orders/cancel"):
                 signature = self._generate_orders_signature(order)
+                data_dict["signature"] = signature
+                request.data = json.dumps(data_dict)
+
+            # Sign order cancellation requests: POST /orders/cancel
+            elif path.endswith("/orders/cancel"):
+                signature = self._generate_cancel_signature(order)
+                data_dict["signature"] = signature
+                request.data = json.dumps(data_dict)
+
+            # Sign LP requests: POST /lp
+            elif path.endswith("/lp"):
+                signature = self._generate_lp_signature(order)
+                data_dict["signature"] = signature
+                request.data = json.dumps(data_dict)
+
+            # Sign withdraw requests: POST /transfer/withdraw
+            elif path.endswith("/transfer/withdraw"):
+                signature = self._generate_withdraw_signature(order)
                 data_dict["signature"] = signature
                 request.data = json.dumps(data_dict)
 
@@ -96,6 +115,83 @@ class VestPerpetualAuth(AuthBase):
                     str(order["size"]),
                     str(order["limitPrice"]),
                     bool(order["reduceOnly"]),
+                ],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        signature = EthAccount.sign_message(signable_msg, self._signing_private_key).signature.hex()
+        return signature
+
+    def _generate_cancel_signature(self, order: Dict[str, Any]) -> str:
+        """Generate the signature for POST /orders/cancel as specified in Vest docs.
+
+        The signed payload is:
+            keccak(encode(["uint256", "uint256", "string"], [time, nonce, id]))
+        """
+        args_hash = keccak(
+            abi_encode(
+                ["uint256", "uint256", "string"],
+                [
+                    int(order["time"]),
+                    int(order["nonce"]),
+                    str(order["id"]),
+                ],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        signature = EthAccount.sign_message(signable_msg, self._signing_private_key).signature.hex()
+        return signature
+
+    def _generate_lp_signature(self, order: Dict[str, Any]) -> str:
+        """Generate the signature for POST /lp as specified in Vest docs.
+
+        The signed payload is:
+            keccak(encode(["uint256", "uint256", "string", "string"], [time, nonce, orderType, size]))
+        """
+        args_hash = keccak(
+            abi_encode(
+                ["uint256", "uint256", "string", "string"],
+                [
+                    int(order["time"]),
+                    int(order["nonce"]),
+                    str(order["orderType"]),
+                    str(order["size"]),
+                ],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        signature = EthAccount.sign_message(signable_msg, self._signing_private_key).signature.hex()
+        return signature
+
+    def _generate_withdraw_signature(self, order: Dict[str, Any]) -> str:
+        """Generate the signature for POST /transfer/withdraw as specified in Vest docs.
+
+        The signed payload is:
+            keccak(encode([
+                "uint256", "uint256", "bool", "address", "address", "address", "uint256", "uint256"
+            ], [time, nonce, False, account, recipient, token, size, chainId]))
+        """
+        args_hash = keccak(
+            abi_encode(
+                [
+                    "uint256",
+                    "uint256",
+                    "bool",
+                    "address",
+                    "address",
+                    "address",
+                    "uint256",
+                    "uint256",
+                ],
+                [
+                    int(order["time"]),
+                    int(order["nonce"]),
+                    False,  # Always False according to docs
+                    str(order["account"]),
+                    str(order["recipient"]),
+                    str(order["token"]),
+                    int(order["size"]),
+                    int(order["chainId"]),
                 ],
             )
         )

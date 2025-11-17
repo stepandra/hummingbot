@@ -131,3 +131,192 @@ class VestPerpetualAuthTests(TestCase):
 
         self.assertIs(result, request)
         self.assertEqual(payload, result.payload)
+
+    def test_generate_cancel_signature_recovers_signing_address(self):
+        """Test that cancel signature can be recovered to signing address."""
+        order = {
+            "time": 1683849600076,
+            "nonce": 1,
+            "id": "order123",
+        }
+
+        # Generate signature
+        signature = self.auth._generate_cancel_signature(order)
+
+        # Recompute hash and recover address
+        args_hash = keccak(
+            encode(
+                ["uint256", "uint256", "string"],
+                [order["time"], order["nonce"], order["id"]],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        recovered_addr = EthAccount.recover_message(signable_msg, signature=signature)
+
+        expected_addr = EthAccount.from_key(self.signing_private_key).address
+        self.assertEqual(expected_addr, recovered_addr)
+
+    def test_generate_lp_signature_recovers_signing_address(self):
+        """Test that LP signature can be recovered to signing address."""
+        order = {
+            "time": 1683849600076,
+            "nonce": 2,
+            "orderType": "ADD",
+            "size": "1000.00",
+        }
+
+        # Generate signature
+        signature = self.auth._generate_lp_signature(order)
+
+        # Recompute hash and recover address
+        args_hash = keccak(
+            encode(
+                ["uint256", "uint256", "string", "string"],
+                [order["time"], order["nonce"], order["orderType"], order["size"]],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        recovered_addr = EthAccount.recover_message(signable_msg, signature=signature)
+
+        expected_addr = EthAccount.from_key(self.signing_private_key).address
+        self.assertEqual(expected_addr, recovered_addr)
+
+    def test_generate_withdraw_signature_recovers_signing_address(self):
+        """Test that withdraw signature can be recovered to signing address."""
+        order = {
+            "time": 1683849600076,
+            "nonce": 3,
+            "account": "0x1234567890123456789012345678901234567890",
+            "recipient": "0x0987654321098765432109876543210987654321",
+            "token": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "size": 1000000000000000000,  # 1 token in wei
+            "chainId": 1,
+        }
+
+        # Generate signature
+        signature = self.auth._generate_withdraw_signature(order)
+
+        # Recompute hash and recover address
+        args_hash = keccak(
+            encode(
+                [
+                    "uint256",
+                    "uint256",
+                    "bool",
+                    "address",
+                    "address",
+                    "address",
+                    "uint256",
+                    "uint256",
+                ],
+                [
+                    order["time"],
+                    order["nonce"],
+                    False,
+                    order["account"],
+                    order["recipient"],
+                    order["token"],
+                    order["size"],
+                    order["chainId"],
+                ],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        recovered_addr = EthAccount.recover_message(signable_msg, signature=signature)
+
+        expected_addr = EthAccount.from_key(self.signing_private_key).address
+        self.assertEqual(expected_addr, recovered_addr)
+
+    @patch(
+        "hummingbot.connector.derivative.vest_perpetual.vest_perpetual_auth.VestPerpetualAuth._generate_cancel_signature"
+    )
+    def test_rest_authenticate_signs_cancel_orders(self, generate_sig_mock: MagicMock):
+        """Test that POST /orders/cancel requests are signed correctly."""
+        generate_sig_mock.return_value = "0xcancelsignature"
+
+        cancel_order = {
+            "time": 1683849600076,
+            "nonce": 1,
+            "id": "order123",
+        }
+        body = {"order": cancel_order}
+        request = RESTRequest(
+            method=RESTMethod.POST,
+            url="https://server-prod.hz.vestmarkets.com/v2/orders/cancel",
+            data=json.dumps(body),
+            is_auth_required=True,
+            throttler_limit_id="/orders/cancel",
+            headers={},
+        )
+
+        self.async_run_with_timeout(self.auth.rest_authenticate(request))
+
+        # Signature added to body
+        updated_body = json.loads(request.data)
+        self.assertEqual("0xcancelsignature", updated_body.get("signature"))
+        generate_sig_mock.assert_called_once_with(cancel_order)
+
+    @patch(
+        "hummingbot.connector.derivative.vest_perpetual.vest_perpetual_auth.VestPerpetualAuth._generate_lp_signature"
+    )
+    def test_rest_authenticate_signs_lp_orders(self, generate_sig_mock: MagicMock):
+        """Test that POST /lp requests are signed correctly."""
+        generate_sig_mock.return_value = "0xlpsignature"
+
+        lp_order = {
+            "time": 1683849600076,
+            "nonce": 2,
+            "orderType": "ADD",
+            "size": "1000.00",
+        }
+        body = {"order": lp_order}
+        request = RESTRequest(
+            method=RESTMethod.POST,
+            url="https://server-prod.hz.vestmarkets.com/v2/lp",
+            data=json.dumps(body),
+            is_auth_required=True,
+            throttler_limit_id="/lp",
+            headers={},
+        )
+
+        self.async_run_with_timeout(self.auth.rest_authenticate(request))
+
+        # Signature added to body
+        updated_body = json.loads(request.data)
+        self.assertEqual("0xlpsignature", updated_body.get("signature"))
+        generate_sig_mock.assert_called_once_with(lp_order)
+
+    @patch(
+        "hummingbot.connector.derivative.vest_perpetual.vest_perpetual_auth.VestPerpetualAuth._generate_withdraw_signature"
+    )
+    def test_rest_authenticate_signs_withdraw_orders(
+        self, generate_sig_mock: MagicMock
+    ):
+        """Test that POST /transfer/withdraw requests are signed correctly."""
+        generate_sig_mock.return_value = "0xwithdrawsignature"
+
+        withdraw_order = {
+            "time": 1683849600076,
+            "nonce": 3,
+            "account": "0x1234567890123456789012345678901234567890",
+            "recipient": "0x0987654321098765432109876543210987654321",
+            "token": "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            "size": 1000000000000000000,
+            "chainId": 1,
+        }
+        body = {"order": withdraw_order}
+        request = RESTRequest(
+            method=RESTMethod.POST,
+            url="https://server-prod.hz.vestmarkets.com/v2/transfer/withdraw",
+            data=json.dumps(body),
+            is_auth_required=True,
+            throttler_limit_id="/transfer/withdraw",
+            headers={},
+        )
+
+        self.async_run_with_timeout(self.auth.rest_authenticate(request))
+
+        # Signature added to body
+        updated_body = json.loads(request.data)
+        self.assertEqual("0xwithdrawsignature", updated_body.get("signature"))
+        generate_sig_mock.assert_called_once_with(withdraw_order)
