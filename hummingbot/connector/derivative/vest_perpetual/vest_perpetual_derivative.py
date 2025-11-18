@@ -1,8 +1,7 @@
-"""
-Vest Perpetual Derivative connector implementation.
-"""
+"""Vest Perpetual Derivative connector implementation."""
 import asyncio
-from decimal import Decimal
+from copy import deepcopy
+from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from bidict import bidict
@@ -19,6 +18,7 @@ from hummingbot.connector.derivative.vest_perpetual.vest_perpetual_user_stream_d
     VestPerpetualUserStreamDataSource,
 )
 from hummingbot.connector.derivative.vest_perpetual.vest_perpetual_utils import (
+    DEFAULT_FEES,
     convert_from_exchange_trading_pair,
     convert_to_exchange_trading_pair,
 )
@@ -143,6 +143,16 @@ class VestPerpetualDerivative(PerpetualDerivativePyBase):
     def _is_order_not_found_during_cancelation_error(self, cancelation_exception: Exception) -> bool:
         return False
 
+    @staticmethod
+    def _safe_decimal(value: Any, default: Decimal) -> Decimal:
+        """Converts any raw value to ``Decimal`` returning a fallback when conversion fails."""
+        try:
+            if value is None:
+                raise InvalidOperation
+            return Decimal(str(value))
+        except (InvalidOperation, TypeError, ValueError):
+            return default
+
     def _create_web_assistants_factory(self) -> WebAssistantsFactory:
         return web_utils.build_api_factory(
             throttler=self._throttler,
@@ -214,10 +224,104 @@ class VestPerpetualDerivative(PerpetualDerivativePyBase):
         # Will be implemented later
         raise NotImplementedError("Order cancellation not yet implemented")
 
-    async def _update_trading_rules(self):
-        """Update trading rules from exchange info."""
-        # Will be implemented later
-        pass
+    async def _format_trading_rules(self, exchange_info_dict: Dict[str, Any]) -> List[TradingRule]:
+        trading_rules: List[TradingRule] = []
+        symbols = exchange_info_dict.get("symbols") if isinstance(exchange_info_dict, dict) else exchange_info_dict
+        symbols = symbols or []
+
+        for symbol_info in symbols:
+            symbol_name = symbol_info.get("symbol") if isinstance(symbol_info, dict) else None
+            status = symbol_info.get("status", CONSTANTS.SYMBOL_STATUS_TRADING) if isinstance(symbol_info, dict) else None
+
+            if symbol_name is None or status != CONSTANTS.SYMBOL_STATUS_TRADING:
+                continue
+
+            trading_pair = convert_from_exchange_trading_pair(symbol_name)
+            if self._trading_pairs and trading_pair not in self._trading_pairs:
+                continue
+
+            filters = {
+                flt.get("filterType"): flt
+                for flt in symbol_info.get("filters", [])
+                if isinstance(flt, dict) and flt.get("filterType")
+            }
+
+            min_qty = self._safe_decimal(
+                symbol_info.get("minQty")
+                or symbol_info.get("minOrderSize")
+                or filters.get("LOT_SIZE", {}).get("minQty"),
+                Decimal("0.0001"),
+            )
+            max_qty = self._safe_decimal(
+                symbol_info.get("maxQty") or filters.get("LOT_SIZE", {}).get("maxQty"),
+                Decimal("1E6"),
+            )
+            step_size = self._safe_decimal(
+                symbol_info.get("stepSize")
+                or symbol_info.get("quantityPrecision")
+                or filters.get("LOT_SIZE", {}).get("stepSize"),
+                min_qty,
+            )
+            tick_size = self._safe_decimal(
+                symbol_info.get("tickSize")
+                or symbol_info.get("priceTickSize")
+                or filters.get("PRICE_FILTER", {}).get("tickSize"),
+                Decimal("0.0001"),
+            )
+            min_notional = self._safe_decimal(
+                symbol_info.get("minNotional")
+                or filters.get("NOTIONAL", {}).get("minNotional"),
+                Decimal("0"),
+            )
+            price_precision = self._safe_decimal(symbol_info.get("pricePrecision"), Decimal("18"))
+            quote_increment = tick_size * step_size if step_size > 0 else tick_size
+
+            order_types = symbol_info.get("orderTypes", [])
+            supports_limit = not order_types or CONSTANTS.ORDER_TYPE_LIMIT in order_types
+            supports_market = not order_types or CONSTANTS.ORDER_TYPE_MARKET in order_types
+
+            collateral_token = symbol_info.get("quoteAsset") or trading_pair.split("-")[1]
+
+            trading_rules.append(
+                TradingRule(
+                    trading_pair=trading_pair,
+                    min_order_size=min_qty,
+                    max_order_size=max_qty,
+                    min_price_increment=tick_size,
+                    min_base_amount_increment=step_size,
+                    min_quote_amount_increment=quote_increment,
+                    min_notional_size=min_notional,
+                    max_price_significant_digits=price_precision,
+                    supports_limit_orders=supports_limit,
+                    supports_market_orders=supports_market,
+                    buy_order_collateral_token=collateral_token,
+                    sell_order_collateral_token=collateral_token,
+                )
+            )
+
+        return trading_rules
+
+    def _initialize_trading_pair_symbols_from_exchange_info(self, exchange_info: Dict[str, Any]):
+        symbols = exchange_info.get("symbols") if isinstance(exchange_info, dict) else exchange_info
+        symbols = symbols or []
+
+        mapping: Dict[str, str] = {}
+        for symbol_info in symbols:
+            if not isinstance(symbol_info, dict):
+                continue
+            symbol_name = symbol_info.get("symbol")
+            status = symbol_info.get("status", CONSTANTS.SYMBOL_STATUS_TRADING)
+            if symbol_name is None or status != CONSTANTS.SYMBOL_STATUS_TRADING:
+                continue
+            trading_pair = convert_from_exchange_trading_pair(symbol_name)
+            if self._trading_pairs and trading_pair not in self._trading_pairs:
+                continue
+            mapping[trading_pair] = symbol_name
+
+        if not mapping and self._trading_pairs:
+            mapping = {tp: convert_to_exchange_trading_pair(tp) for tp in self._trading_pairs}
+
+        self._trading_pair_symbol_map = bidict(mapping)
 
     async def _update_balances(self):
         """Update account balances."""
@@ -247,3 +351,29 @@ class VestPerpetualDerivative(PerpetualDerivativePyBase):
             )
         else:
             self._trading_pair_symbol_map = bidict()
+
+    async def _update_trading_fees(self):
+        """Assigns a default fee schema for each tracked trading pair."""
+        for trading_pair in self.trading_pairs or []:
+            self._trading_fees[trading_pair] = deepcopy(DEFAULT_FEES)
+
+    async def _update_positions(self):
+        """Clears locally cached positions when the exchange does not provide an endpoint yet."""
+        position_keys = list(self._perpetual_trading.account_positions.keys())
+        for key in position_keys:
+            self._perpetual_trading.remove_position(key)
+
+    async def _set_trading_pair_leverage(self, trading_pair: str, leverage: int) -> Tuple[bool, str]:
+        if leverage < 1:
+            return False, "Leverage must be greater than or equal to 1."
+        return True, ""
+
+    async def _trading_pair_position_mode_set(
+        self, mode: PositionMode, trading_pair: str
+    ) -> Tuple[bool, str]:
+        if mode == PositionMode.ONEWAY:
+            return True, ""
+        return False, "Vest Perpetual currently supports only the ONEWAY position mode."
+
+    async def _fetch_last_fee_payment(self, trading_pair: str) -> Tuple[float, Decimal, Decimal]:
+        return 0.0, Decimal("-1"), Decimal("-1")
