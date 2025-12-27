@@ -10,6 +10,9 @@ WORKDIR /home/hummingbot
 
 # Create conda environment
 COPY setup/environment.yml /tmp/environment.yml
+RUN conda config --set remote_max_retries 10 && \
+    conda config --set remote_connect_timeout_secs 30 && \
+    conda config --set remote_read_timeout_secs 120
 RUN conda env create -f /tmp/environment.yml && \
     conda clean -afy && \
     rm /tmp/environment.yml
