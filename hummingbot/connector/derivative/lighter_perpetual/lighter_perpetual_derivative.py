@@ -10,25 +10,46 @@ from bidict import bidict
 from hummingbot.connector.constants import s_decimal_NaN
 from hummingbot.connector.derivative.lighter_perpetual import (
     lighter_perpetual_constants as CONSTANTS,
+)
+from hummingbot.connector.derivative.lighter_perpetual import (
     lighter_perpetual_web_utils as web_utils,
 )
 from hummingbot.connector.derivative.lighter_perpetual.lighter_perpetual_api_order_book_data_source import (
     LighterPerpetualAPIOrderBookDataSource,
 )
-from hummingbot.connector.derivative.lighter_perpetual.lighter_perpetual_auth import LighterPerpetualAuth
+from hummingbot.connector.derivative.lighter_perpetual.lighter_perpetual_auth import (
+    LighterPerpetualAuth,
+)
 from hummingbot.connector.derivative.lighter_perpetual.lighter_perpetual_user_stream_data_source import (
     LighterPerpetualUserStreamDataSource,
 )
 from hummingbot.connector.derivative.position import Position
 from hummingbot.connector.perpetual_derivative_py_base import PerpetualDerivativePyBase
 from hummingbot.connector.trading_rule import TradingRule
-from hummingbot.connector.utils import combine_to_hb_trading_pair, get_new_client_order_id
+from hummingbot.connector.utils import (
+    combine_to_hb_trading_pair,
+    get_new_client_order_id,
+)
 from hummingbot.core.api_throttler.data_types import RateLimit
-from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PositionSide, TradeType
-from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderUpdate, TradeUpdate
-from hummingbot.core.data_type.order_book_tracker_data_source import OrderBookTrackerDataSource
+from hummingbot.core.data_type.common import (
+    OrderType,
+    PositionAction,
+    PositionMode,
+    PositionSide,
+    TradeType,
+)
+from hummingbot.core.data_type.in_flight_order import (
+    InFlightOrder,
+    OrderUpdate,
+    TradeUpdate,
+)
+from hummingbot.core.data_type.order_book_tracker_data_source import (
+    OrderBookTrackerDataSource,
+)
 from hummingbot.core.data_type.trade_fee import TokenAmount, TradeFeeBase
-from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
+from hummingbot.core.data_type.user_stream_tracker_data_source import (
+    UserStreamTrackerDataSource,
+)
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.utils.estimate_fee import build_trade_fee
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
@@ -53,6 +74,7 @@ class LighterPerpetualDerivative(PerpetualDerivativePyBase):
         trading_pairs: Optional[List[str]] = None,
         trading_required: bool = True,
         domain: str = CONSTANTS.DOMAIN,
+        lighter_perpetual_domain: Optional[str] = None,
         lighter_perpetual_account_index: int = 0,
         lighter_perpetual_api_key_index: int = 0,
         lighter_perpetual_max_api_key_index: Optional[int] = None,
@@ -66,7 +88,16 @@ class LighterPerpetualDerivative(PerpetualDerivativePyBase):
         self._use_vault = use_vault
         self._trading_required = trading_required
         self._trading_pairs = trading_pairs
-        self._domain = domain
+        resolved_domain = domain
+        if lighter_perpetual_domain:
+            domain_key = lighter_perpetual_domain.lower()
+            if domain_key == "mainnet":
+                resolved_domain = CONSTANTS.DOMAIN
+            elif domain_key == "testnet":
+                resolved_domain = CONSTANTS.TESTNET_DOMAIN
+            else:
+                resolved_domain = lighter_perpetual_domain
+        self._domain = resolved_domain
         self._position_mode = None
         self._last_trade_history_timestamp = None
         self.coin_to_asset: Dict[str, int] = {}

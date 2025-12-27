@@ -31,10 +31,10 @@ class VestPerpetualAuth(AuthBase):
         headers.update(self.header_for_authentication())
         request.headers = headers
 
-        if request.method == RESTMethod.POST:
-            parsed = urlparse(request.url)
-            path = parsed.path or ""
+        parsed = urlparse(request.url)
+        path = parsed.path or ""
 
+        if request.method == RESTMethod.POST:
             # Sign order placement requests: POST /orders
             if path.endswith("/orders"):
                 data_dict = self._ensure_json_dict(request.data)
@@ -42,6 +42,14 @@ class VestPerpetualAuth(AuthBase):
                 signature = self._generate_orders_signature(order)
                 data_dict["signature"] = signature
                 request.data = json.dumps(data_dict)
+
+        elif request.method == RESTMethod.DELETE:
+            # Sign cancel order requests: DELETE /orders
+            if path.endswith("/orders"):
+                params = request.params or {}
+                signature = self._generate_cancel_signature(params)
+                params["signature"] = signature
+                request.params = params
 
         return request
 
@@ -51,9 +59,11 @@ class VestPerpetualAuth(AuthBase):
 
     def header_for_authentication(self) -> Dict[str, str]:
         """Base headers required for all private REST/WS calls."""
+        api_key = self._api_key or ""
+        account_group = self._account_group if self._account_group is not None else 0
         return {
-            "X-API-KEY": self._api_key,
-            "xrestservermm": f"restserver{self._account_group}",
+            "X-API-KEY": api_key,
+            "xrestservermm": f"restserver{account_group}",
         }
 
     @staticmethod
@@ -97,6 +107,25 @@ class VestPerpetualAuth(AuthBase):
                     str(order["limitPrice"]),
                     bool(order["reduceOnly"]),
                 ],
+            )
+        )
+        signable_msg = encode_defunct(args_hash)
+        signature = EthAccount.sign_message(signable_msg, self._signing_private_key).signature.hex()
+        return signature
+
+    def _generate_cancel_signature(self, params: Dict[str, Any]) -> str:
+        """Generate the signature for DELETE /orders (cancel order).
+
+        The signed payload follows the same pattern as order placement,
+        signing over the order ID and timestamp.
+        """
+        order_id = params.get("id", "")
+        timestamp = params.get("time", 0)
+
+        args_hash = keccak(
+            abi_encode(
+                ["uint256", "string"],
+                [int(timestamp), str(order_id)],
             )
         )
         signable_msg = encode_defunct(args_hash)

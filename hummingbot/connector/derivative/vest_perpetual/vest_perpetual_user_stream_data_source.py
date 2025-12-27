@@ -1,11 +1,12 @@
 import asyncio
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import hummingbot.connector.derivative.vest_perpetual.vest_perpetual_constants as CONSTANTS
 import hummingbot.connector.derivative.vest_perpetual.vest_perpetual_web_utils as web_utils
 from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
 from hummingbot.core.utils.async_utils import safe_ensure_future
+from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTMethod, WSJSONRequest
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
@@ -17,23 +18,39 @@ if TYPE_CHECKING:
 
 
 class VestPerpetualUserStreamDataSource(UserStreamTrackerDataSource):
+    HEARTBEAT_TIME_INTERVAL = CONSTANTS.HEARTBEAT_TIME_INTERVAL
     _logger: Optional[HummingbotLogger] = None
 
     def __init__(
         self,
-        auth: "VestPerpetualAuth",
+        auth: AuthBase,
+        trading_pairs: Optional[List[str]] = None,
         connector: "VestPerpetualDerivative",
         api_factory: WebAssistantsFactory,
-        use_testnet: bool = False,
+        domain: str = CONSTANTS.DEFAULT_DOMAIN,
     ):
         super().__init__()
+        self._domain = domain
+        self._api_factory = api_factory
         self._auth = auth
         self._connector = connector
-        self._api_factory = api_factory
-        self._use_testnet = use_testnet
+        self._trading_pairs = trading_pairs or []
+        self._ws_assistant: Optional[WSAssistant] = None
         self._listen_key: Optional[str] = None
         self._listen_key_initialized_event = asyncio.Event()
         self._manage_listen_key_task: Optional[asyncio.Task] = None
+
+    @classmethod
+    def logger(cls) -> HummingbotLogger:
+        if cls._logger is None:
+            cls._logger = HummingbotLogger("VestPerpetualUserStreamDataSource")
+        return cls._logger
+
+    @property
+    def _ws(self) -> WSAssistant:
+        if self._ws_assistant is None:
+            raise RuntimeError("Websocket assistant not initialized.")
+        return self._ws_assistant
 
     @property
     def last_recv_time(self) -> float:
@@ -44,16 +61,16 @@ class VestPerpetualUserStreamDataSource(UserStreamTrackerDataSource):
         await self._get_listen_key()
 
         account_group = getattr(self._connector, "_account_group", 0)
-        domain = getattr(self._connector, "domain", CONSTANTS.DEFAULT_DOMAIN)
         ws_url = web_utils.private_ws_url(
             listen_key=self._listen_key or "",
-            domain=domain,
+            domain=self._domain,
             account_group=account_group,
         )
 
         ws: WSAssistant = await self._api_factory.get_ws_assistant()
-        await ws.connect(ws_url=ws_url, ping_timeout=CONSTANTS.HEARTBEAT_TIME_INTERVAL)
-
+        await ws.connect(ws_url=ws_url, ping_timeout=self.HEARTBEAT_TIME_INTERVAL)
+        safe_ensure_future(self._send_heartbeat(ws))
+        self._ws_assistant = ws
         return ws
 
     async def _subscribe_channels(self, ws: WSAssistant):
@@ -74,17 +91,53 @@ class VestPerpetualUserStreamDataSource(UserStreamTrackerDataSource):
             self.logger().exception("Error subscribing to user stream")
             raise
 
-    async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
+    async def _process_event_message(
+        self, event_message: Dict[str, Any], queue: asyncio.Queue
+    ):
+        """Process a single event message and add to queue if relevant."""
+        if event_message.get("type") == "error":
+            raise IOError(event_message)
+        event_type = event_message.get("e") or event_message.get("event")
+        channel = event_message.get("channel", "")
+        if event_type in {
+            CONSTANTS.WS_EVENT_ORDER,
+            CONSTANTS.WS_EVENT_TRANSFER,
+            CONSTANTS.WS_EVENT_LP,
+        } or channel == CONSTANTS.WS_ACCOUNT_PRIVATE_CHANNEL:
+            queue.put_nowait(event_message)
+
+    async def _send_heartbeat(self, ws: WSAssistant):
+        """Send periodic heartbeat/ping to keep connection alive."""
+        try:
+            while True:
+                await asyncio.sleep(self.HEARTBEAT_TIME_INTERVAL)
+                await ws.send(WSJSONRequest(payload={"method": "PING"}))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger().debug("Heartbeat task error", exc_info=True)
+
+    async def _process_websocket_messages(
+        self, websocket_assistant: WSAssistant, queue: asyncio.Queue
+    ):
         """Process incoming user stream messages."""
-        async for ws_response in websocket_assistant.iter_messages():
-            data = ws_response.data
-            if "channel" in data and data["channel"] == CONSTANTS.WS_ACCOUNT_PRIVATE_CHANNEL:
-                queue.put_nowait(data)
+        while True:
+            try:
+                message = await websocket_assistant.receive_json()
+                await self._process_event_message(message, queue)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self.logger().exception(
+                    "Unexpected error while processing user stream messages"
+                )
+                await self._sleep(5)
 
     async def _get_listen_key(self):
         """Obtain a listen key from the exchange."""
         rest_assistant = await self._api_factory.get_rest_assistant()
-        url = web_utils.rest_url(CONSTANTS.LISTEN_KEY_PATH_URL, self._use_testnet)
+        use_testnet = self._domain == CONSTANTS.TESTNET_DOMAIN
+        url = web_utils.rest_url(CONSTANTS.LISTEN_KEY_PATH_URL, use_testnet=use_testnet)
 
         response = await rest_assistant.execute_request(
             url=url,
@@ -103,7 +156,8 @@ class VestPerpetualUserStreamDataSource(UserStreamTrackerDataSource):
             return
 
         rest_assistant = await self._api_factory.get_rest_assistant()
-        url = web_utils.rest_url(CONSTANTS.LISTEN_KEY_PATH_URL, self._use_testnet)
+        use_testnet = self._domain == CONSTANTS.TESTNET_DOMAIN
+        url = web_utils.rest_url(CONSTANTS.LISTEN_KEY_PATH_URL, use_testnet=use_testnet)
 
         try:
             await rest_assistant.execute_request(

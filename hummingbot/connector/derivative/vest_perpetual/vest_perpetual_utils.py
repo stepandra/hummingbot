@@ -33,11 +33,13 @@ def convert_from_exchange_trading_pair(exchange_symbol: str) -> str:
     """
     Converts exchange symbol to Hummingbot trading pair format.
     For Vest: BTC-PERP, ETH-PERP, SOL-PERP -> BTC-PERP, ETH-PERP, SOL-PERP (no conversion needed)
-    For equities: AAPL-USD-PERP -> AAPL-USD-PERP
+    For equities: AAPL-USD-PERP -> AAPL-USD (remove extra hyphen/suffix to satisfy split_hb_trading_pair)
 
     :param exchange_symbol: The exchange symbol (e.g. "BTC-PERP")
     :return: Hummingbot trading pair (e.g. "BTC-PERP")
     """
+    if exchange_symbol.endswith("-USD-PERP"):
+        return exchange_symbol.replace("-USD-PERP", "-USD")
     return exchange_symbol
 
 
@@ -48,6 +50,9 @@ def convert_to_exchange_trading_pair(hb_trading_pair: str) -> str:
     :param hb_trading_pair: The Hummingbot trading pair (e.g. "BTC-PERP")
     :return: Exchange symbol (e.g. "BTC-PERP")
     """
+    if hb_trading_pair.endswith("-USD") and not hb_trading_pair.startswith("USD"):
+        # Heuristic reversibility for equities
+        return f"{hb_trading_pair}-PERP"
     return hb_trading_pair
 
 

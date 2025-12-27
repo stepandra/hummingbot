@@ -42,7 +42,11 @@ class VestPerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
 
     async def get_funding_info(self, trading_pair: str) -> FundingInfo:
         rest_assistant = await self._api_factory.get_rest_assistant()
-        symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair)
+        try:
+            symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair)
+        except KeyError:
+            raise ValueError(f"Trading pair {trading_pair} not found on Vest Perpetual.")
+
         params = {"symbols": symbol}
 
         response = await rest_assistant.execute_request(
@@ -118,21 +122,21 @@ class VestPerpetualAPIOrderBookDataSource(PerpetualAPIOrderBookDataSource):
         return ""
 
     async def _order_book_snapshot(self, trading_pair: str) -> OrderBookMessage:
-        rest_assistant = await self._api_factory.get_rest_assistant()
-        symbol = await self._connector.exchange_symbol_associated_to_pair(trading_pair)
-        params = {"symbol": symbol, "limit": 100}
-
-        response = await rest_assistant.execute_request(
-            url=web_utils.rest_url(CONSTANTS.DEPTH_PATH_URL, use_testnet=self._use_testnet),
-            throttler_limit_id=CONSTANTS.DEPTH_PATH_URL,
-            method=RESTMethod.GET,
-            params=params,
-        )
-
-        return self._order_book_message_from_depth(
-            trading_pair=trading_pair,
-            depth_data=response,
+        """Get order book snapshot.
+        
+        Vest does not provide a REST endpoint for order book depth.
+        Return an empty snapshot that will be populated by WebSocket depth updates.
+        """
+        timestamp = self._time()
+        return OrderBookMessage(
             message_type=OrderBookMessageType.SNAPSHOT,
+            content={
+                "trading_pair": trading_pair,
+                "update_id": int(timestamp * 1e3),
+                "bids": [],
+                "asks": [],
+            },
+            timestamp=timestamp,
         )
 
     async def _parse_order_book_snapshot_message(self, raw_message: Dict[str, Any], message_queue: asyncio.Queue):

@@ -1,11 +1,20 @@
 """
 Vest Perpetual API constants.
 """
+from decimal import Decimal
+from typing import Dict
 
 from hummingbot.core.api_throttler.data_types import LinkedLimitWeightPair, RateLimit
+from hummingbot.core.data_type.in_flight_order import OrderState
 
 EXCHANGE_NAME = "vest_perpetual"
-DEFAULT_DOMAIN = EXCHANGE_NAME
+BROKER_ID = "HBOT"
+MAX_ORDER_ID_LEN = None
+
+MARKET_ORDER_SLIPPAGE = Decimal("0.05")
+
+DOMAIN = EXCHANGE_NAME
+DEFAULT_DOMAIN = DOMAIN
 TESTNET_DOMAIN = f"{EXCHANGE_NAME}_testnet"
 
 # Base URLs
@@ -44,13 +53,10 @@ TICKER_LATEST_PATH_URL = "/ticker/latest"
 TICKER_24HR_PATH_URL = "/ticker/24hr"
 FUNDING_HISTORY_PATH_URL = "/funding/history"
 KLINES_PATH_URL = "/klines"
-TRADES_PATH_URL = "/trades"
-DEPTH_PATH_URL = "/depth"
 ACCOUNT_PATH_URL = "/account"
 ACCOUNT_NONCE_PATH_URL = "/account/nonce"
 ACCOUNT_LEVERAGE_PATH_URL = "/account/leverage"
 ORDERS_PATH_URL = "/orders"
-ORDERS_CANCEL_PATH_URL = "/orders/cancel"
 LP_PATH_URL = "/lp"
 TRANSFER_WITHDRAW_PATH_URL = "/transfer/withdraw"
 TRANSFER_PATH_URL = "/transfer"
@@ -91,27 +97,69 @@ SYMBOL_STATUS_TRADING = "TRADING"
 SYMBOL_STATUS_HALT = "HALT"
 
 # Heartbeat interval for WebSocket ping/pong (seconds)
-HEARTBEAT_TIME_INTERVAL = 30
+HEARTBEAT_TIME_INTERVAL = 30.0
 
-# Rate limits
-# According to docs, rate limits are enforced but specific values not documented
-# Using conservative defaults
+# Order state mapping (like Lighter)
+ORDER_STATE: Dict[str, OrderState] = {
+    "NEW": OrderState.OPEN,
+    "new": OrderState.OPEN,
+    "PENDING": OrderState.OPEN,
+    "pending": OrderState.OPEN,
+    "OPEN": OrderState.OPEN,
+    "open": OrderState.OPEN,
+    "PARTIALLY_FILLED": OrderState.PARTIALLY_FILLED,
+    "partially_filled": OrderState.PARTIALLY_FILLED,
+    "FILLED": OrderState.FILLED,
+    "filled": OrderState.FILLED,
+    "CANCELLED": OrderState.CANCELED,
+    "CANCELED": OrderState.CANCELED,
+    "cancelled": OrderState.CANCELED,
+    "canceled": OrderState.CANCELED,
+    "REJECTED": OrderState.FAILED,
+    "rejected": OrderState.FAILED,
+    "FAILED": OrderState.FAILED,
+    "failed": OrderState.FAILED,
+}
+
+# Rate limits - using LinkedLimitWeightPair pattern like Lighter
+REST_GLOBAL_LIMIT_ID = "vest_rest_global_limit"
+REST_GLOBAL_LIMIT = 1200
+RATE_LIMIT_INTERVAL = 60
+
+# Endpoint weights for rate limiting
+ENDPOINT_WEIGHTS: Dict[str, int] = {
+    EXCHANGE_INFO_PATH_URL: 10,
+    TICKER_LATEST_PATH_URL: 10,
+    TICKER_24HR_PATH_URL: 10,
+    FUNDING_HISTORY_PATH_URL: 10,
+    KLINES_PATH_URL: 10,
+    ACCOUNT_PATH_URL: 20,
+    ACCOUNT_NONCE_PATH_URL: 20,
+    ACCOUNT_LEVERAGE_PATH_URL: 20,
+    ORDERS_PATH_URL: 10,
+    LP_PATH_URL: 20,
+    TRANSFER_WITHDRAW_PATH_URL: 50,
+    TRANSFER_PATH_URL: 20,
+    LISTEN_KEY_PATH_URL: 20,
+    REGISTER_PATH_URL: 100,
+}
+
 RATE_LIMITS = [
-    RateLimit(limit_id=EXCHANGE_INFO_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=TICKER_LATEST_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=TICKER_24HR_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=FUNDING_HISTORY_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=KLINES_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=TRADES_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=DEPTH_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=ACCOUNT_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=ACCOUNT_NONCE_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=ACCOUNT_LEVERAGE_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=ORDERS_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=ORDERS_CANCEL_PATH_URL, limit=10, time_interval=1),
-    RateLimit(limit_id=LP_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=TRANSFER_WITHDRAW_PATH_URL, limit=2, time_interval=1),
-    RateLimit(limit_id=TRANSFER_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=LISTEN_KEY_PATH_URL, limit=5, time_interval=1),
-    RateLimit(limit_id=REGISTER_PATH_URL, limit=1, time_interval=10),
+    RateLimit(
+        REST_GLOBAL_LIMIT_ID, limit=REST_GLOBAL_LIMIT, time_interval=RATE_LIMIT_INTERVAL
+    ),
 ]
+
+for endpoint, weight in ENDPOINT_WEIGHTS.items():
+    per_route_limit = max(1, REST_GLOBAL_LIMIT // weight)
+    RATE_LIMITS.append(
+        RateLimit(
+            limit_id=endpoint,
+            limit=per_route_limit,
+            time_interval=RATE_LIMIT_INTERVAL,
+            linked_limits=[LinkedLimitWeightPair(REST_GLOBAL_LIMIT_ID, weight=weight)],
+        )
+    )
+
+ORDER_NOT_EXIST_MESSAGE = "order"
+UNKNOWN_ORDER_MESSAGE = "Order not found"

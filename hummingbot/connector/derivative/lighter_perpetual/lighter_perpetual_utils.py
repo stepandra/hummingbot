@@ -36,6 +36,15 @@ class LighterPerpetualConfigMap(BaseConnectorConfigMap):
             "prompt_on_new": True,
         },
     )
+    lighter_perpetual_api_key: SecretStr = Field(
+        default=...,
+        json_schema_extra={
+            "prompt": "Enter your Lighter API key",
+            "is_secure": True,
+            "is_connect_key": True,
+            "prompt_on_new": True,
+        },
+    )
     lighter_perpetual_account_index: int = Field(
         default=0,
         json_schema_extra={
@@ -96,6 +105,15 @@ class LighterPerpetualTestnetConfigMap(BaseConnectorConfigMap):
         default=...,
         json_schema_extra={
             "prompt": "Enter your Lighter testnet API private key",
+            "is_secure": True,
+            "is_connect_key": True,
+            "prompt_on_new": True,
+        },
+    )
+    lighter_perpetual_testnet_api_key: SecretStr = Field(
+        default=...,
+        json_schema_extra={
+            "prompt": "Enter your Lighter testnet API key",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
