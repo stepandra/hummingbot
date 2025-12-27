@@ -1,26 +1,31 @@
 import asyncio
 import json
-from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 from typing import Dict, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from hummingbot.connector.exchange.vertex import vertex_constants as CONSTANTS, vertex_web_utils as web_utils
-from hummingbot.connector.exchange.vertex.vertex_api_user_stream_data_source import VertexAPIUserStreamDataSource
-from hummingbot.connector.exchange.vertex.vertex_auth import VertexAuth
-from hummingbot.connector.exchange.vertex.vertex_exchange import VertexExchange
-from hummingbot.connector.test_support.network_mocking_assistant import NetworkMockingAssistant
+from hummingbot.connector.exchange.nado import nado_constants as CONSTANTS
+from hummingbot.connector.exchange.nado import nado_web_utils as web_utils
+from hummingbot.connector.exchange.nado.nado_api_user_stream_data_source import (
+    NadoAPIUserStreamDataSource,
+)
+from hummingbot.connector.exchange.nado.nado_auth import NadoAuth
+from hummingbot.connector.exchange.nado.nado_exchange import NadoExchange
+from hummingbot.connector.test_support.network_mocking_assistant import (
+    NetworkMockingAssistant,
+)
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
+from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 
 
-class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
+class TestNadoAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
     # the level is required to receive logs from the data source logger
     level = 0
 
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.base_asset = "wBTC"
-        cls.quote_asset = "USDC"
+        cls.base_asset = "WBTC"
+        cls.quote_asset = "USDT0"
         cls.trading_pair = f"{cls.base_asset}-{cls.quote_asset}"
         cls.ex_trading_pair = cls.base_asset + cls.quote_asset
         cls.domain = CONSTANTS.TESTNET_DOMAIN
@@ -36,22 +41,26 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
         self.mock_time_provider.time.return_value = 1000
 
         # NOTE: RANDOM KEYS GENERATED JUST FOR UNIT TESTS
-        self.auth = VertexAuth(
+        self.auth = NadoAuth(
             "0x2162Db26939B9EAF0C5404217774d166056d31B5",  # noqa: mock
             "5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
         )
-        self.connector = VertexExchange(
-            vertex_arbitrum_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",  # noqa: mock
-            vertex_arbitrum_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
+        self.connector = NadoExchange(
+            nado_ink_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",  # noqa: mock
+            nado_ink_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
             trading_pairs=[self.trading_pair],
             domain=self.domain,
         )
 
-        self.connector._exchange_market_info = {self.domain: self.get_exchange_market_info_mock()}
+        self.connector._exchange_market_info = {
+            self.domain: self.get_exchange_market_info_mock()
+        }
 
-        self.api_factory = web_utils.build_api_factory(throttler=self.throttler, auth=self.auth)
+        self.api_factory = web_utils.build_api_factory(
+            throttler=self.throttler, auth=self.auth
+        )
 
-        self.data_source = VertexAPIUserStreamDataSource(
+        self.data_source = NadoAPIUserStreamDataSource(
             auth=self.auth,
             trading_pairs=[self.trading_pair],
             domain=self.domain,
@@ -71,7 +80,10 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
         self.log_records.append(record)
 
     def _is_logged(self, log_level: str, message: str) -> bool:
-        return any(record.levelname == log_level and record.getMessage() == message for record in self.log_records)
+        return any(
+            record.levelname == log_level and record.getMessage() == message
+            for record in self.log_records
+        )
 
     def get_exchange_market_info_mock(self) -> Dict:
         exchange_rules = {
@@ -116,8 +128,8 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
                     "collected_fees": "56936143536016463686263",
                     "lp_spread_x18": "3000000000000000",
                 },
-                "symbol": "wBTC",
-                "market": "wBTC/USDC",
+                "symbol": "WBTC",
+                "market": "WBTC/USDT0",
                 "contract": "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
             },
         }
@@ -127,41 +139,60 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
     async def test_listen_for_user_stream_does_not_queue_unknown_event(self, mock_ws):
         unknown_event = [{"type": "unknown_event"}]
         mock_ws.return_value = self.mocking_assistant.create_websocket_mock()
-        self.mocking_assistant.add_websocket_aiohttp_message(mock_ws.return_value, json.dumps(unknown_event))
+        self.mocking_assistant.add_websocket_aiohttp_message(
+            mock_ws.return_value, json.dumps(unknown_event)
+        )
 
         msg_queue = asyncio.Queue()
-        self.listening_task = self.local_event_loop.create_task(self.data_source.listen_for_user_stream(msg_queue))
+        self.listening_task = self.local_event_loop.create_task(
+            self.data_source.listen_for_user_stream(msg_queue)
+        )
 
-        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(mock_ws.return_value)
+        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(
+            mock_ws.return_value
+        )
 
         self.assertEqual(0, msg_queue.qsize())
 
-    @patch("hummingbot.connector.exchange.vertex.vertex_auth.VertexAuth._time")
+    @patch("hummingbot.connector.exchange.nado.nado_auth.NadoAuth._time")
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    async def test_listen_for_user_stream_failure_logs_error(self, ws_connect_mock, auth_time_mock):
+    async def test_listen_for_user_stream_failure_logs_error(
+        self, ws_connect_mock, auth_time_mock
+    ):
         auth_time_mock.side_effect = [100]
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
         unknown_event = {"type": "unknown_event"}
         self.mocking_assistant.add_websocket_aiohttp_message(
-            websocket_mock=ws_connect_mock.return_value, message=json.dumps(unknown_event)
+            websocket_mock=ws_connect_mock.return_value,
+            message=json.dumps(unknown_event),
         )
 
         output_queue = asyncio.Queue()
 
-        self.listening_task = self.local_event_loop.create_task(self.data_source.listen_for_user_stream(output=output_queue))
+        self.listening_task = self.local_event_loop.create_task(
+            self.data_source.listen_for_user_stream(output=output_queue)
+        )
 
-        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(ws_connect_mock.return_value)
+        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(
+            ws_connect_mock.return_value
+        )
 
-        sent_subscription_messages = self.mocking_assistant.json_messages_sent_through_websocket(
-            websocket_mock=ws_connect_mock.return_value
+        sent_subscription_messages = (
+            self.mocking_assistant.json_messages_sent_through_websocket(
+                websocket_mock=ws_connect_mock.return_value
+            )
         )
 
         self.assertEqual(2, len(sent_subscription_messages))
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    @patch("hummingbot.core.data_type.user_stream_tracker_data_source.UserStreamTrackerDataSource._sleep")
-    async def test_listen_for_user_stream_iter_message_throws_exception(self, sleep_mock, mock_ws):
+    @patch(
+        "hummingbot.core.data_type.user_stream_tracker_data_source.UserStreamTrackerDataSource._sleep"
+    )
+    async def test_listen_for_user_stream_iter_message_throws_exception(
+        self, sleep_mock, mock_ws
+    ):
         msg_queue: asyncio.Queue = asyncio.Queue()
         mock_ws.return_value = self.mocking_assistant.create_websocket_mock()
         mock_ws.return_value.receive.side_effect = Exception("TEST ERROR")
@@ -173,15 +204,26 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
             pass
 
         self.assertTrue(
-            self._is_logged("ERROR", "Unexpected error while listening to user stream. Retrying after 5 seconds...")
+            self._is_logged(
+                "ERROR",
+                "Unexpected error while listening to user stream. Retrying after 5 seconds...",
+            )
         )
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
     @patch(
-        "hummingbot.connector.exchange.vertex.vertex_api_user_stream_data_source.VertexAPIUserStreamDataSource" "._time"
+        "hummingbot.connector.exchange.nado.nado_api_user_stream_data_source.NadoAPIUserStreamDataSource"
+        "._time"
     )
-    async def test_listen_for_user_stream_subscribe_message(self, time_mock, ws_connect_mock):
-        time_mock.side_effect = [1000, 1100, 1101, 1102]  # Simulate first ping interval is already due
+    async def test_listen_for_user_stream_subscribe_message(
+        self, time_mock, ws_connect_mock
+    ):
+        time_mock.side_effect = [
+            1000,
+            1100,
+            1101,
+            1102,
+        ]  # Simulate first ping interval is already due
 
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
@@ -191,9 +233,13 @@ class TestVertexAPIUserStreamDataSource(IsolatedAsyncioWrapperTestCase):
 
         output_queue = asyncio.Queue()
 
-        self.listening_task = self.local_event_loop.create_task(self.data_source.listen_for_user_stream(output=output_queue))
+        self.listening_task = self.local_event_loop.create_task(
+            self.data_source.listen_for_user_stream(output=output_queue)
+        )
 
-        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(ws_connect_mock.return_value)
+        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(
+            ws_connect_mock.return_value
+        )
 
         sent_messages = self.mocking_assistant.json_messages_sent_through_websocket(
             websocket_mock=ws_connect_mock.return_value

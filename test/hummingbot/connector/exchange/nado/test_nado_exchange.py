@@ -8,18 +8,22 @@ from unittest.mock import AsyncMock, patch
 
 from aioresponses import aioresponses
 from bidict import bidict
+from hummingbot.connector.trading_rule import TradingRule
+from hummingbot.core.event.event_logger import EventLogger
+from hummingbot.core.network_iterator import NetworkStatus
 
 from hummingbot.client.config.client_config_map import ClientConfigMap
 from hummingbot.client.config.config_helpers import ClientConfigAdapter
-from hummingbot.connector.exchange.vertex import vertex_constants as CONSTANTS, vertex_web_utils as web_utils
-from hummingbot.connector.exchange.vertex.vertex_api_order_book_data_source import VertexAPIOrderBookDataSource
-from hummingbot.connector.exchange.vertex.vertex_exchange import VertexExchange
-from hummingbot.connector.trading_rule import TradingRule
+from hummingbot.connector.exchange.nado import nado_constants as CONSTANTS
+from hummingbot.connector.exchange.nado import nado_web_utils as web_utils
+from hummingbot.connector.exchange.nado.nado_api_order_book_data_source import (
+    NadoAPIOrderBookDataSource,
+)
+from hummingbot.connector.exchange.nado.nado_exchange import NadoExchange
 from hummingbot.connector.utils import get_new_client_order_id
 from hummingbot.core.data_type.cancellation_result import CancellationResult
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState
-from hummingbot.core.event.event_logger import EventLogger
 from hummingbot.core.event.events import (
     BuyOrderCompletedEvent,
     BuyOrderCreatedEvent,
@@ -29,10 +33,9 @@ from hummingbot.core.event.events import (
     OrderFilledEvent,
     SellOrderCreatedEvent,
 )
-from hummingbot.core.network_iterator import NetworkStatus
 
 
-class TestVertexExchange(unittest.TestCase):
+class TestNadoExchange(unittest.TestCase):
     # the level is required to receive logs from the data source logger
     level = 0
 
@@ -40,12 +43,14 @@ class TestVertexExchange(unittest.TestCase):
     def setUpClass(cls) -> None:
         super().setUpClass()
         cls.ev_loop = asyncio.get_event_loop()
-        cls.base_asset = "wBTC"
-        cls.quote_asset = "USDC"
+        cls.base_asset = "WBTC"
+        cls.quote_asset = "USDT0"
         cls.trading_pair = f"{cls.base_asset}-{cls.quote_asset}"
         cls.ex_trading_pair = cls.base_asset + cls.quote_asset
         cls.domain = CONSTANTS.TESTNET_DOMAIN
-        cls.trading_fees = {cls.trading_pair: {"maker": Decimal("0.0"), "taker": Decimal("0.0002")}}
+        cls.trading_fees = {
+            cls.trading_pair: {"maker": Decimal("0.0"), "taker": Decimal("0.0002")}
+        }
 
     def setUp(self) -> None:
         super().setUp()
@@ -55,9 +60,9 @@ class TestVertexExchange(unittest.TestCase):
         self.client_config_map = ClientConfigAdapter(ClientConfigMap())
 
         # NOTE: RANDOM KEYS GENERATED JUST FOR UNIT TESTS
-        self.exchange = VertexExchange(
-            vertex_arbitrum_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",  # noqa: mock
-            vertex_arbitrum_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
+        self.exchange = NadoExchange(
+            nado_ink_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",  # noqa: mock
+            nado_ink_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
             trading_pairs=[self.trading_pair],
             domain=self.domain,
         )
@@ -69,17 +74,19 @@ class TestVertexExchange(unittest.TestCase):
         self.exchange._time_synchronizer.logger().addHandler(self)
         self.exchange._order_tracker.logger().setLevel(1)
         self.exchange._order_tracker.logger().addHandler(self)
-        self.exchange._exchange_market_info = {self.domain: self.get_exchange_market_info_mock()}
+        self.exchange._exchange_market_info = {
+            self.domain: self.get_exchange_market_info_mock()
+        }
 
         self._initialize_event_loggers()
 
-        VertexAPIOrderBookDataSource._trading_pair_symbol_map = {
+        NadoAPIOrderBookDataSource._trading_pair_symbol_map = {
             CONSTANTS.DEFAULT_DOMAIN: bidict({self.ex_trading_pair: self.trading_pair})
         }
 
     def tearDown(self) -> None:
         self.test_task and self.test_task.cancel()
-        VertexAPIOrderBookDataSource._trading_pair_symbol_map = {}
+        NadoAPIOrderBookDataSource._trading_pair_symbol_map = {}
         super().tearDown()
 
     def _initialize_event_loggers(self):
@@ -108,7 +115,10 @@ class TestVertexExchange(unittest.TestCase):
         self.log_records.append(record)
 
     def _is_logged(self, log_level: str, message: str) -> bool:
-        return any(record.levelname == log_level and record.getMessage() == message for record in self.log_records)
+        return any(
+            record.levelname == log_level and record.getMessage() == message
+            for record in self.log_records
+        )
 
     def async_run_with_timeout(self, coroutine: Awaitable, timeout: int = 1):
         ret = self.ev_loop.run_until_complete(asyncio.wait_for(coroutine, timeout))
@@ -119,7 +129,7 @@ class TestVertexExchange(unittest.TestCase):
 
     def get_exchange_symbols_mock(self) -> List[Dict[str, Any]]:
         exchange_symbols = [
-            {"product_id": 0, "symbol": "USDC"},
+            {"product_id": 0, "symbol": "USDT0"},
             {"product_id": 1, "symbol": "BTC"},
             {"product_id": 2, "symbol": "BTC-PERP"},
             {"product_id": 3, "symbol": "ETH"},
@@ -132,34 +142,6 @@ class TestVertexExchange(unittest.TestCase):
             {"product_id": 14, "symbol": "POL-PERP"},
         ]
         return exchange_symbols
-
-    def get_exchange_contracts_mock(self) -> Dict:
-        exchange_contracts = {
-            "status": "success",
-            "data": {
-                "chain_id": "421613",
-                "endpoint_addr": "0x5956d6f55011678b2cab217cd21626f7668ba6c5",  # noqa: mock
-                "book_addrs": [
-                    "0x0000000000000000000000000000000000000000",  # noqa: mock
-                    "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
-                    "0x291b578ff99bfef1706a2018d9dfdd98773e4f3e",  # noqa: mock
-                    "0x4008c7b762d7000034207bdef628a798065c3dcc",  # noqa: mock
-                    "0xe5106c497f8398ee8d1d6d246f08c125245d19ff",  # noqa: mock
-                    "0x49eff6d3de555be7a039d0b86471e3cb454b35de",  # noqa: mock
-                    "0xc5f223f12d091fba16141d4eeb5d39c5e0e2577c",  # noqa: mock
-                    "0xe65a493369bc41acebbc1ef7c78b2c12a972184d",  # noqa: mock
-                    "0x0897fc0e6f293da5e7da70cd296daff588fdbe55",  # noqa: mock
-                    "0x7a6eb01e393d9e32f4733ffa68c63363894a36bc",  # noqa: mock
-                    "0xcba84e5d703f604adac66f605383fc1f87a45be8",  # noqa: mock
-                    "0x5516479d3c4189bdfd0e98282779242068b08c1f",  # noqa: mock
-                    "0xc5ee375688580a72970eefd7f52e1100bcda3927",  # noqa: mock
-                    "0x38bafd8d005fe2cbde0761b3cf1fdba25d835fd8",  # noqa: mock
-                    "0x7c5953ce20d82caf70f00e4ecf9f0e67df3174d0",  # noqa: mock
-                ],
-            },
-            "request_type": "query_contracts",
-        }
-        return exchange_contracts
 
     def get_exchange_market_info_mock(self) -> Dict:
         exchange_rules = {
@@ -204,9 +186,9 @@ class TestVertexExchange(unittest.TestCase):
                     "collected_fees": "56936143536016463686263",
                     "lp_spread_x18": "3000000000000000",
                 },
-                "symbol": "wBTC",
-                "market": "wBTC/USDC",
-                "contract": "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
+                "symbol": "WBTC",
+                "market": "WBTC/USDT0",
+                "contract": "0x0000000000000000000000000000000000000001",  # noqa: mock
             },
         }
         return exchange_rules
@@ -236,7 +218,10 @@ class TestVertexExchange(unittest.TestCase):
                 "perp_balances": [
                     {
                         "product_id": 2,
-                        "lp_balance": {"amount": "0", "last_cumulative_funding_x18": "-1001518877793429853"},
+                        "lp_balance": {
+                            "amount": "0",
+                            "last_cumulative_funding_x18": "-1001518877793429853",
+                        },
                         "balance": {
                             "amount": "-100000000000000000",
                             "v_quote_balance": "100000000000000000",
@@ -270,8 +255,14 @@ class TestVertexExchange(unittest.TestCase):
                         },
                         "lp_state": {
                             "supply": "0",
-                            "quote": {"amount": "0", "last_cumulative_multiplier_x18": "0"},
-                            "base": {"amount": "0", "last_cumulative_multiplier_x18": "0"},
+                            "quote": {
+                                "amount": "0",
+                                "last_cumulative_multiplier_x18": "0",
+                            },
+                            "base": {
+                                "amount": "0",
+                                "last_cumulative_multiplier_x18": "0",
+                            },
                         },
                         "book_info": {
                             "size_increment": "0",
@@ -280,8 +271,8 @@ class TestVertexExchange(unittest.TestCase):
                             "collected_fees": "0",
                             "lp_spread_x18": "0",
                         },
-                        "symbol": "USDC",
-                        "market": "USDC/USDC",
+                        "symbol": "USDT0",
+                        "market": "USDT0/USDT0",
                         "contract": "0x0000000000000000000000000000000000000000",  # noqa: mock
                     },
                     {
@@ -325,9 +316,9 @@ class TestVertexExchange(unittest.TestCase):
                             "collected_fees": "499223396588563365634",
                             "lp_spread_x18": "3000000000000000",
                         },
-                        "symbol": "wBTC",
-                        "market": "wBTC/USDC",
-                        "contract": "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
+                        "symbol": "WBTC",
+                        "market": "WBTC/USDT0",
+                        "contract": "0x0000000000000000000000000000000000000001",  # noqa: mock
                     },
                 ],
                 "perp_products": [
@@ -376,7 +367,7 @@ class TestVertexExchange(unittest.TestCase):
                         "sender": "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",  # noqa: mock
                         "priceX18": "25000000000000000000000",
                         "amount": "1000000000000000000",
-                        "expiration": "4611687704073609553",
+                        "expiration": "1685649491",
                         "nonce": "1767528267032559689",
                     },
                     "base_filled": "1000000000000000000",
@@ -399,7 +390,7 @@ class TestVertexExchange(unittest.TestCase):
                                     "sender": "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",  # noqa: mock
                                     "price_x18": "25000000000000000000000",
                                     "amount": "1000000000000000000",
-                                    "expiration": 4611687704073609553,
+                                    "expiration": 1685649491,
                                     "nonce": 1767528267032559689,
                                 },
                                 "signature": "0x",  # noqa: mock
@@ -432,7 +423,7 @@ class TestVertexExchange(unittest.TestCase):
                         "sender": "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",  # noqa: mock
                         "priceX18": "25000000000000000000000",
                         "amount": "1000000000000000000",
-                        "expiration": "4611687704073609553",
+                        "expiration": "1685649491",
                         "nonce": "1767528267032559689",
                     },
                     "base_filled": "0",
@@ -456,7 +447,7 @@ class TestVertexExchange(unittest.TestCase):
                 "sender": "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",  # noqa: mock
                 "price_x18": "25000000000000000000000",
                 "amount": "1000000000000000000",
-                "expiration": "1686250284884",
+                "expiration": "1686250284",
                 "order_type": "default",
                 "nonce": "1768161672830124761",
                 "unfilled_amount": "0",
@@ -539,9 +530,7 @@ class TestVertexExchange(unittest.TestCase):
         }
 
     def mock_balance_updates(self, mock_api) -> None:
-        bal_url = (
-            f"{CONSTANTS.BASE_URLS[self.domain]}/query?subaccount={self.exchange.sender_address}&type=subaccount_info"
-        )
+        bal_url = f"{CONSTANTS.BASE_URLS[self.domain]}/query?subaccount={self.exchange.sender_address}&type=subaccount_info"
         bal_response = self.get_balances_mock()
         mock_api.get(bal_url, body=json.dumps(bal_response))
 
@@ -558,7 +547,9 @@ class TestVertexExchange(unittest.TestCase):
 
     @aioresponses()
     def test_check_network_success(self, mock_api):
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE
+        )
         resp = {"status": "success", "data": "active"}
         mock_api.get(url, body=json.dumps(resp))
 
@@ -568,7 +559,9 @@ class TestVertexExchange(unittest.TestCase):
 
     @aioresponses()
     def test_check_network_failure(self, mock_api):
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE
+        )
         mock_api.get(url, status=500)
 
         ret = self.async_run_with_timeout(coroutine=self.exchange.check_network())
@@ -577,17 +570,25 @@ class TestVertexExchange(unittest.TestCase):
 
     @aioresponses()
     def test_check_network_raises_cancel_exception(self, mock_api):
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE
+        )
 
         mock_api.get(url, exception=asyncio.CancelledError)
 
-        self.assertRaises(asyncio.CancelledError, self.async_run_with_timeout, self.exchange.check_network())
+        self.assertRaises(
+            asyncio.CancelledError,
+            self.async_run_with_timeout,
+            self.exchange.check_network(),
+        )
 
     @aioresponses()
     def test_update_trading_rules(self, mock_api):
         self.exchange._set_current_timestamp(1000)
 
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
 
         resp = self.get_exchange_market_info_mock()
         mock_api.get(url, body=json.dumps(resp))
@@ -597,7 +598,7 @@ class TestVertexExchange(unittest.TestCase):
         self.assertTrue(self.trading_pair in self.exchange._trading_rules)
 
     def test_initial_status_dict(self):
-        VertexAPIOrderBookDataSource._trading_pair_symbol_map = {}
+        NadoAPIOrderBookDataSource._trading_pair_symbol_map = {}
 
         status_dict = self.exchange.status_dict
 
@@ -614,8 +615,8 @@ class TestVertexExchange(unittest.TestCase):
 
     def test_get_fee_returns_fee_from_exchange_if_available_and_default_if_not(self):
         fee = self.exchange.get_fee(
-            base_currency="wBTC",
-            quote_currency="USDC",
+            base_currency="WBTC",
+            quote_currency="USDT0",
             order_type=OrderType.LIMIT,
             order_side=TradeType.BUY,
             amount=Decimal("10"),
@@ -729,11 +730,15 @@ class TestVertexExchange(unittest.TestCase):
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
         creation_response = {"status": "success", "error": None}
 
-        tradingrule_url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        tradingrule_url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
         resp = self.get_exchange_market_info_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(
-            url, body=json.dumps(creation_response), callback=lambda *args, **kwargs: request_sent_event.set()
+            url,
+            body=json.dumps(creation_response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
         )
         self.mock_balance_updates(mock_api)
         self.test_task = asyncio.get_event_loop().create_task(
@@ -749,14 +754,22 @@ class TestVertexExchange(unittest.TestCase):
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(
-            ((key, value) for key, value in mock_api.requests.items() if key[1].human_repr().startswith(url))
+            (
+                (key, value)
+                for key, value in mock_api.requests.items()
+                if key[1].human_repr().startswith(url)
+            )
         )
-        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"]["order"]
+        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"][
+            "order"
+        ]
         self.assertEqual(
-            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000", request_data["sender"]  # noqa: mock
+            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",
+            request_data["sender"],  # noqa: mock
         )
         self.assertEqual("10000000000000000000000", request_data["priceX18"])
         self.assertEqual("100000000000000000000", request_data["amount"])
+        self.assertEqual("1", request_data["appendix"])
 
         self.assertIn("ABC1", self.exchange.in_flight_orders)
         create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
@@ -768,8 +781,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual("ABC1", create_event.order_id)
 
         self.assertTrue(
-            self._is_logged("INFO", f"Created LIMIT BUY order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
-                                    f"at {Decimal('10000.0000')}.")
+            self._is_logged(
+                "INFO",
+                f"Created LIMIT BUY order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
+                f"at {Decimal('10000.0000')}.",
+            )
         )
 
     @aioresponses()
@@ -780,11 +796,15 @@ class TestVertexExchange(unittest.TestCase):
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
         creation_response = {"status": "success", "error": None}
 
-        tradingrule_url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        tradingrule_url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
         resp = self.get_exchange_market_info_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(
-            url, body=json.dumps(creation_response), callback=lambda *args, **kwargs: request_sent_event.set()
+            url,
+            body=json.dumps(creation_response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
         )
 
         self.mock_balance_updates(mock_api)
@@ -801,14 +821,22 @@ class TestVertexExchange(unittest.TestCase):
         self.async_run_with_timeout(request_sent_event.wait())
 
         order_request = next(
-            ((key, value) for key, value in mock_api.requests.items() if key[1].human_repr().startswith(url))
+            (
+                (key, value)
+                for key, value in mock_api.requests.items()
+                if key[1].human_repr().startswith(url)
+            )
         )
-        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"]["order"]
+        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"][
+            "order"
+        ]
         self.assertEqual(
-            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000", request_data["sender"]  # noqa: mock
+            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",
+            request_data["sender"],  # noqa: mock
         )
         self.assertEqual("10000000000000000000000", request_data["priceX18"])
         self.assertEqual("100000000000000000000", request_data["amount"])
+        self.assertEqual("1537", request_data["appendix"])
 
         self.assertIn("ABC1", self.exchange.in_flight_orders)
         create_event: BuyOrderCreatedEvent = self.buy_order_created_logger.event_log[0]
@@ -821,13 +849,14 @@ class TestVertexExchange(unittest.TestCase):
 
         self.assertTrue(
             self._is_logged(
-                "INFO", f"Created LIMIT_MAKER BUY order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
-                        f"at {Decimal('10000.0000')}."
+                "INFO",
+                f"Created LIMIT_MAKER BUY order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
+                f"at {Decimal('10000.0000')}.",
             )
         )
 
     @aioresponses()
-    @patch("hummingbot.connector.exchange.vertex.vertex_exchange.VertexExchange.get_price")
+    @patch("hummingbot.connector.exchange.nado.nado_exchange.NadoExchange.get_price")
     def test_create_market_order_successfully(self, mock_api, get_price_mock):
         get_price_mock.return_value = Decimal(1000)
         self._simulate_trading_rules_initialized()
@@ -836,11 +865,15 @@ class TestVertexExchange(unittest.TestCase):
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
         creation_response = {"status": "success", "error": None}
 
-        tradingrule_url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        tradingrule_url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
         resp = self.get_exchange_market_info_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
         mock_api.post(
-            url, body=json.dumps(creation_response), callback=lambda *args, **kwargs: request_sent_event.set()
+            url,
+            body=json.dumps(creation_response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
         )
         self.mock_balance_updates(mock_api)
         self.test_task = asyncio.get_event_loop().create_task(
@@ -856,17 +889,26 @@ class TestVertexExchange(unittest.TestCase):
         self.async_run_with_timeout(request_sent_event.wait(), 10)
 
         order_request = next(
-            ((key, value) for key, value in mock_api.requests.items() if key[1].human_repr().startswith(url))
+            (
+                (key, value)
+                for key, value in mock_api.requests.items()
+                if key[1].human_repr().startswith(url)
+            )
         )
-        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"]["order"]
+        request_data = json.loads(order_request[1][0].kwargs["data"])["place_order"][
+            "order"
+        ]
         self.assertEqual(
-            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000", request_data["sender"]  # noqa: mock
+            "0x2162Db26939B9EAF0C5404217774d166056d31B564656661756c740000000000",
+            request_data["sender"],  # noqa: mock
         )
         self.assertEqual("10000000000000000000000", request_data["priceX18"])
         self.assertEqual("-100000000000000000000", request_data["amount"])
 
         self.assertIn("ABC1", self.exchange.in_flight_orders)
-        create_event: SellOrderCreatedEvent = self.sell_order_created_logger.event_log[0]
+        create_event: SellOrderCreatedEvent = self.sell_order_created_logger.event_log[
+            0
+        ]
         self.assertEqual(self.exchange.current_timestamp, create_event.timestamp)
         self.assertEqual(self.trading_pair, create_event.trading_pair)
         self.assertEqual(OrderType.MARKET, create_event.type)
@@ -874,8 +916,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual("ABC1", create_event.order_id)
 
         self.assertTrue(
-            self._is_logged("INFO", f"Created MARKET SELL order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
-                                    f"at {Decimal('10000')}.")
+            self._is_logged(
+                "INFO",
+                f"Created MARKET SELL order ABC1 for {Decimal('100.000000')} {self.trading_pair} "
+                f"at {Decimal('10000')}.",
+            )
         )
 
     @aioresponses()
@@ -884,10 +929,14 @@ class TestVertexExchange(unittest.TestCase):
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
-        tradingrule_url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        tradingrule_url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
         resp = self.get_exchange_market_info_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
-        mock_api.post(url, status=400, callback=lambda *args, **kwargs: request_sent_event.set())
+        mock_api.post(
+            url, status=400, callback=lambda *args, **kwargs: request_sent_event.set()
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
             self.exchange._create_order(
@@ -909,16 +958,22 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual("ABC1", failure_event.order_id)
 
     @aioresponses()
-    def test_create_order_fails_when_trading_rule_error_and_raises_failure_event(self, mock_api):
+    def test_create_order_fails_when_trading_rule_error_and_raises_failure_event(
+        self, mock_api
+    ):
         self._simulate_trading_rules_initialized()
         request_sent_event = asyncio.Event()
         self.exchange._set_current_timestamp(1640780000)
 
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
-        tradingrule_url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE)
+        tradingrule_url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.ALL_PRODUCTS_REQUEST_TYPE
+        )
         resp = self.get_exchange_market_info_mock()
         mock_api.get(tradingrule_url, body=json.dumps(resp))
-        mock_api.post(url, status=400, callback=lambda *args, **kwargs: request_sent_event.set())
+        mock_api.post(
+            url, status=400, callback=lambda *args, **kwargs: request_sent_event.set()
+        )
 
         self.test_task = asyncio.get_event_loop().create_task(
             self.exchange._create_order(
@@ -954,7 +1009,7 @@ class TestVertexExchange(unittest.TestCase):
         self.assertTrue(
             self._is_logged(
                 "NETWORK",
-                f"Error submitting buy LIMIT order to {self.exchange.name_cap} for 100.000000 {self.trading_pair} 10000.0000."
+                f"Error submitting buy LIMIT order to {self.exchange.name_cap} for 100.000000 {self.trading_pair} 10000.0000.",
             )
         )
 
@@ -979,7 +1034,11 @@ class TestVertexExchange(unittest.TestCase):
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
         response = {"status": "success", "error": None}
 
-        mock_api.post(url, body=json.dumps(response), callback=lambda *args, **kwargs: request_sent_event.set())
+        mock_api.post(
+            url,
+            body=json.dumps(response),
+            callback=lambda *args, **kwargs: request_sent_event.set(),
+        )
 
         self.mock_balance_updates(mock_api)
         self.exchange.cancel(client_order_id="ABC1", trading_pair=self.trading_pair)
@@ -989,7 +1048,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
         self.assertEqual(order.client_order_id, cancel_event.order_id)
 
-        self.assertTrue(self._is_logged("INFO", f"Successfully canceled order {order.client_order_id}."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"Successfully canceled order {order.client_order_id}."
+            )
+        )
 
     @aioresponses()
     def test_cancel_order_raises_failure_event_when_request_fails(self, mock_api):
@@ -1011,14 +1074,18 @@ class TestVertexExchange(unittest.TestCase):
 
         url = web_utils.public_rest_url(CONSTANTS.POST_PATH_URL, domain=self.domain)
 
-        mock_api.post(url, status=400, callback=lambda *args, **kwargs: request_sent_event.set())
+        mock_api.post(
+            url, status=400, callback=lambda *args, **kwargs: request_sent_event.set()
+        )
 
         self.exchange.cancel(client_order_id="ABC1", trading_pair=self.trading_pair)
         self.async_run_with_timeout(request_sent_event.wait())
 
         self.assertAlmostEqual(0, len(self.order_cancelled_logger.event_log))
 
-        self.assertTrue(self._is_logged("ERROR", f"Failed to cancel order {order.client_order_id}"))
+        self.assertTrue(
+            self._is_logged("ERROR", f"Failed to cancel order {order.client_order_id}")
+        )
 
     @aioresponses()
     def test_cancel_two_orders_with_cancel_all_and_one_fails(self, mock_api):
@@ -1062,24 +1129,38 @@ class TestVertexExchange(unittest.TestCase):
         cancellation_results = self.async_run_with_timeout(self.exchange.cancel_all(10))
 
         self.assertEqual(2, len(cancellation_results))
-        self.assertEqual(CancellationResult(order1.client_order_id, True), cancellation_results[0])
-        self.assertEqual(CancellationResult(order2.client_order_id, False), cancellation_results[1])
+        self.assertEqual(
+            CancellationResult(order1.client_order_id, True), cancellation_results[0]
+        )
+        self.assertEqual(
+            CancellationResult(order2.client_order_id, False), cancellation_results[1]
+        )
 
         self.assertEqual(1, len(self.order_cancelled_logger.event_log))
         cancel_event: OrderCancelledEvent = self.order_cancelled_logger.event_log[0]
         self.assertEqual(self.exchange.current_timestamp, cancel_event.timestamp)
         self.assertEqual(order1.client_order_id, cancel_event.order_id)
 
-        self.assertTrue(self._is_logged("INFO", f"Successfully canceled order {order1.client_order_id}."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"Successfully canceled order {order1.client_order_id}."
+            )
+        )
 
     @aioresponses()
-    @patch("hummingbot.connector.time_synchronizer.TimeSynchronizer._current_seconds_counter")
-    def test_update_time_synchronizer_successfully(self, mock_api, seconds_counter_mock):
+    @patch(
+        "hummingbot.connector.time_synchronizer.TimeSynchronizer._current_seconds_counter"
+    )
+    def test_update_time_synchronizer_successfully(
+        self, mock_api, seconds_counter_mock
+    ):
         seconds_counter_mock.side_effect = [0, 0, 0]
         self.exchange._set_current_timestamp(1640780000)
 
         self.exchange._time_synchronizer.clear_time_offset_ms_samples()
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE
+        )
 
         response = {"status": "success", "data": "active"}
 
@@ -1091,7 +1172,9 @@ class TestVertexExchange(unittest.TestCase):
     @aioresponses()
     def test_update_time_synchronizer_failure_is_logged(self, mock_api):
         self.exchange._set_current_timestamp(1640780000)
-        url = self.get_query_url(CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE)
+        url = self.get_query_url(
+            CONSTANTS.QUERY_PATH_URL, CONSTANTS.STATUS_REQUEST_TYPE
+        )
 
         response = {"status": "success", "data": "failed"}
 
@@ -1114,7 +1197,7 @@ class TestVertexExchange(unittest.TestCase):
 
         available_balances = self.exchange.available_balances
 
-        self.assertEqual(Decimal("1"), available_balances["wBTC"])
+        self.assertEqual(Decimal("1"), available_balances["WBTC"])
 
     @aioresponses()
     def test_update_order_status_when_filled(self, mock_api):
@@ -1133,7 +1216,9 @@ class TestVertexExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders[digest]
 
-        matches_url = web_utils.public_rest_url(CONSTANTS.INDEXER_PATH_URL, domain=self.domain)
+        matches_url = web_utils.public_rest_url(
+            CONSTANTS.INDEXER_PATH_URL, domain=self.domain
+        )
         matches_response = self.get_matches_filled_mock()
         mock_api.post(matches_url, body=json.dumps(matches_response))
 
@@ -1159,7 +1244,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual(order.order_type, buy_event.order_type)
         self.assertEqual(order.exchange_order_id, buy_event.exchange_order_id)
         self.assertNotIn(order.client_order_id, self.exchange.in_flight_orders)
-        self.assertTrue(self._is_logged("INFO", f"BUY order {order.client_order_id} completely filled."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"BUY order {order.client_order_id} completely filled."
+            )
+        )
 
     @aioresponses()
     def test_update_order_status_when_cancelled(self, mock_api):
@@ -1178,7 +1267,9 @@ class TestVertexExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders[digest]
 
-        matches_url = web_utils.public_rest_url(CONSTANTS.INDEXER_PATH_URL, domain=self.domain)
+        matches_url = web_utils.public_rest_url(
+            CONSTANTS.INDEXER_PATH_URL, domain=self.domain
+        )
         matches_response = self.get_matches_unfilled_mock()
         mock_api.post(matches_url, body=json.dumps(matches_response))
 
@@ -1193,7 +1284,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertEqual(order.client_order_id, cancel_event.order_id)
         self.assertEqual(order.exchange_order_id, cancel_event.exchange_order_id)
         self.assertNotIn(order.client_order_id, self.exchange.in_flight_orders)
-        self.assertTrue(self._is_logged("INFO", f"Successfully canceled order {order.client_order_id}."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"Successfully canceled order {order.client_order_id}."
+            )
+        )
 
     @aioresponses()
     def test_update_order_status_when_order_has_not_changed(self, mock_api):
@@ -1212,7 +1307,9 @@ class TestVertexExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders[digest]
 
-        matches_url = web_utils.public_rest_url(CONSTANTS.INDEXER_PATH_URL, domain=self.domain)
+        matches_url = web_utils.public_rest_url(
+            CONSTANTS.INDEXER_PATH_URL, domain=self.domain
+        )
         matches_response = self.get_matches_unfilled_mock()
         mock_api.post(matches_url, body=json.dumps(matches_response))
 
@@ -1229,7 +1326,9 @@ class TestVertexExchange(unittest.TestCase):
         self.assertFalse(order.is_done)
 
     @aioresponses()
-    def test_update_order_status_when_request_fails_marks_order_as_not_found(self, mock_api):
+    def test_update_order_status_when_request_fails_marks_order_as_not_found(
+        self, mock_api
+    ):
         self.exchange._set_current_timestamp(1640780000)
         self.exchange._last_poll_timestamp = self.exchange.current_timestamp - 10 - 1
         digest = "0x7b76413f438b5dd83550901304d8afed47720358acbd923890cd9431a58d3092"  # noqa: mock
@@ -1254,7 +1353,12 @@ class TestVertexExchange(unittest.TestCase):
         self.assertFalse(order.is_filled)
         self.assertFalse(order.is_done)
 
-        self.assertEqual(1, self.exchange._order_tracker._order_not_found_records[order.client_order_id])
+        self.assertEqual(
+            1,
+            self.exchange._order_tracker._order_not_found_records[
+                order.client_order_id
+            ],
+        )
 
     @aioresponses()
     def test_user_stream_update_for_new_order_does_not_update_status(self, mock_api):
@@ -1272,7 +1376,9 @@ class TestVertexExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders[digest]
 
-        matches_url = web_utils.public_rest_url(CONSTANTS.INDEXER_PATH_URL, domain=self.domain)
+        matches_url = web_utils.public_rest_url(
+            CONSTANTS.INDEXER_PATH_URL, domain=self.domain
+        )
         matches_response = self.get_matches_unfilled_mock()
         mock_api.post(matches_url, body=json.dumps(matches_response))
 
@@ -1281,7 +1387,7 @@ class TestVertexExchange(unittest.TestCase):
         mock_api.get(orders_url, body=json.dumps(orders_response))
         self.async_run_with_timeout(self.exchange._update_order_status())
 
-        event_message = {"type": "nonexistent_vertex_event"}
+        event_message = {"type": "nonexistent_nado_event"}
         mock_queue = AsyncMock()
         mock_queue.get.side_effect = [event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
@@ -1315,7 +1421,9 @@ class TestVertexExchange(unittest.TestCase):
         )
         order: InFlightOrder = self.exchange.in_flight_orders[digest]
 
-        matches_url = web_utils.public_rest_url(CONSTANTS.INDEXER_PATH_URL, domain=self.domain)
+        matches_url = web_utils.public_rest_url(
+            CONSTANTS.INDEXER_PATH_URL, domain=self.domain
+        )
         matches_response = self.get_matches_unfilled_mock()
         mock_api.post(matches_url, body=json.dumps(matches_response))
 
@@ -1325,7 +1433,7 @@ class TestVertexExchange(unittest.TestCase):
 
         self.async_run_with_timeout(self.exchange._update_order_status())
 
-        event_message = {"type": "nonexistent_vertex_event"}
+        event_message = {"type": "nonexistent_nado_event"}
         mock_queue = AsyncMock()
         mock_queue.get.side_effect = [event_message, asyncio.CancelledError]
         self.exchange._user_stream_tracker._user_stream = mock_queue
@@ -1343,7 +1451,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertTrue(order.is_cancelled)
         self.assertTrue(order.is_done)
 
-        self.assertTrue(self._is_logged("INFO", f"Successfully canceled order {order.client_order_id}."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"Successfully canceled order {order.client_order_id}."
+            )
+        )
 
     def test_user_stream_update_for_order_partial_fill(self):
         self.exchange._set_current_timestamp(1640780000)
@@ -1389,7 +1501,7 @@ class TestVertexExchange(unittest.TestCase):
             self._is_logged(
                 "INFO",
                 f"The {order.trade_type.name} order {order.client_order_id} amounting to "
-                f"{fill_event.amount}/{order.amount} {order.base_asset} has been filled at {Decimal('25000')} USDC.",
+                f"{fill_event.amount}/{order.amount} {order.base_asset} has been filled at {Decimal('25000')} USDT0.",
             )
         )
 
@@ -1441,7 +1553,11 @@ class TestVertexExchange(unittest.TestCase):
         self.assertTrue(order.is_filled)
         self.assertTrue(order.is_done)
 
-        self.assertTrue(self._is_logged("INFO", f"BUY order {order.client_order_id} completely filled."))
+        self.assertTrue(
+            self._is_logged(
+                "INFO", f"BUY order {order.client_order_id} completely filled."
+            )
+        )
 
     # def test_user_stream_balance_update(self):
     #     self.exchange._set_current_timestamp(1640780000)
@@ -1456,8 +1572,8 @@ class TestVertexExchange(unittest.TestCase):
     #     except asyncio.CancelledError:
     #         pass
 
-    #     self.assertEqual(Decimal("1"), self.exchange.available_balances["wBTC"])
-    #     self.assertEqual(Decimal("1"), self.exchange.get_balance("wBTC"))
+    #     self.assertEqual(Decimal("1"), self.exchange.available_balances["WBTC"])
+    #     self.assertEqual(Decimal("1"), self.exchange.get_balance("WBTC"))
 
     @aioresponses()
     def test_get_account_max_withdrawable(self, mock_api):
@@ -1476,7 +1592,9 @@ class TestVertexExchange(unittest.TestCase):
         self.exchange._user_stream_tracker._user_stream = mock_queue
 
         self.assertRaises(
-            asyncio.CancelledError, self.async_run_with_timeout, self.exchange._user_stream_event_listener()
+            asyncio.CancelledError,
+            self.async_run_with_timeout,
+            self.exchange._user_stream_event_listener(),
         )
 
     @aioresponses()
@@ -1487,7 +1605,9 @@ class TestVertexExchange(unittest.TestCase):
         mock_api.get(url, body=json.dumps(response))
 
         try:
-            self.async_run_with_timeout(coroutine=self.exchange._get_account(), timeout=2)
+            self.async_run_with_timeout(
+                coroutine=self.exchange._get_account(), timeout=2
+            )
         except asyncio.CancelledError:
             pass
 
@@ -1507,17 +1627,4 @@ class TestVertexExchange(unittest.TestCase):
             pass
 
         self.assertEqual(int(0), self.exchange._symbols[0]["product_id"])
-        self.assertEqual("USDC", self.exchange._symbols[0]["symbol"])
-
-    @aioresponses()
-    def test_contracts(self, mock_api):
-        contracts_response = self.get_exchange_contracts_mock()
-        contracts_url = f"{CONSTANTS.BASE_URLS[self.domain]}/query?type=contracts"
-        mock_api.get(contracts_url, body=json.dumps(contracts_response))
-
-        try:
-            self.async_run_with_timeout(self.exchange._get_contracts(), timeout=2)
-        except asyncio.CancelledError:
-            pass
-
-        self.assertEqual("0x0000000000000000000000000000000000000000", self.exchange._contracts[0])  # noqa: mock
+        self.assertEqual("USDT0", self.exchange._symbols[0]["symbol"])

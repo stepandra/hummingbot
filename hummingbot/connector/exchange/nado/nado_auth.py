@@ -6,7 +6,7 @@ from coincurve import PrivateKey
 from eip712_structs import make_domain
 from eth_utils import big_endian_to_int
 
-import hummingbot.connector.exchange.vertex.vertex_constants as CONSTANTS
+import hummingbot.connector.exchange.nado.nado_constants as CONSTANTS
 from hummingbot.connector.utils import to_0x_hex
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.connections.data_types import RESTRequest, WSRequest
@@ -16,14 +16,14 @@ def keccak_hash(x):
     return sha3.keccak_256(x).digest()
 
 
-class VertexAuth(AuthBase):
-    def __init__(self, vertex_arbitrum_address: str, vertex_arbitrum_private_key: str):
-        self.sender_address = vertex_arbitrum_address
-        self.private_key = vertex_arbitrum_private_key
+class NadoAuth(AuthBase):
+    def __init__(self, nado_ink_address: str, nado_ink_private_key: str):
+        self.sender_address = nado_ink_address
+        self.private_key = nado_ink_private_key
 
     async def rest_authenticate(self, request: RESTRequest) -> RESTRequest:
         """
-        This method is intended to configure a rest request to be authenticated. Vertex does not use this
+        This method is intended to configure a rest request to be authenticated. Nado does not use this
         functionality.
 
         :param request: the request to be configured for authenticated interaction
@@ -32,7 +32,7 @@ class VertexAuth(AuthBase):
 
     async def ws_authenticate(self, request: WSRequest) -> WSRequest:
         """
-        This method is intended to configure a websocket request to be authenticated. Vertex does not use this
+        This method is intended to configure a websocket request to be authenticated. Nado does not use this
         functionality.
 
         :param request: the request to be configured for authenticated interaction
@@ -41,26 +41,33 @@ class VertexAuth(AuthBase):
 
     def get_referral_code_headers(self):
         """
-        Generates referral headers when supported by Vertex
+        Generates referral headers when supported by Nado
 
         :return: a dictionary of auth headers
         """
         headers = {"referer": CONSTANTS.HBOT_BROKER_ID}
         return headers
 
-    def sign_payload(self, payload: Any, contract: str, chain_id: int) -> Tuple[str, str]:
+    def sign_payload(
+        self, payload: Any, contract: str, chain_id: int
+    ) -> Tuple[str, str]:
         """
         Signs the payload using the sender address (address with subaccount identifier) and private key
         provided in the configuration.
 
         :param payload: the payload using EIP712 structure for signature (eg. order, cancel)
-        :param contract: the market or general contract signing in domain struct creation for Vertex
+        :param contract: the market or general contract signing in domain struct creation for Nado
         :param chain_id: the chain used for domain struct creation (NOTE: different for testnet vs mainnet)
 
         :return: a tuple for both a string hex of the signature of the EIP712 payload and a string hex of
         the digest
         """
-        domain = make_domain(name="Vertex", version=CONSTANTS.VERSION, chainId=chain_id, verifyingContract=contract)
+        domain = make_domain(
+            name="Nado",
+            version=CONSTANTS.VERSION,
+            chainId=chain_id,
+            verifyingContract=contract,
+        )
 
         signable_bytes = payload.signable_bytes(domain)
         # Digest for order tracking in Hummingbot
@@ -78,7 +85,7 @@ class VertexAuth(AuthBase):
 
     def generate_digest(self, signable_bytes: bytearray) -> str:
         """
-        Generates the digest of the payload for use across Vetext lookups
+        Generates the digest of the payload for use across Nado lookups
 
         :param signable_bytes: the bytes of the payload
 

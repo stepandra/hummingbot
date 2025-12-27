@@ -1,12 +1,18 @@
 from typing import Any, Dict, Optional
 
-from hummingbot.connector.exchange.vertex.vertex_utils import convert_from_x18, convert_timestamp
+from hummingbot.connector.exchange.nado.nado_utils import (
+    convert_from_x18,
+    convert_timestamp,
+)
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.core.data_type.order_book import OrderBook
-from hummingbot.core.data_type.order_book_message import OrderBookMessage, OrderBookMessageType
+from hummingbot.core.data_type.order_book_message import (
+    OrderBookMessage,
+    OrderBookMessageType,
+)
 
 
-class VertexOrderBook(OrderBook):
+class NadoOrderBook(OrderBook):
     @classmethod
     def snapshot_message_from_exchange_websocket(
         cls, msg: Dict[str, Any], timestamp: float, metadata: Optional[Dict] = None
@@ -59,7 +65,10 @@ class VertexOrderBook(OrderBook):
 
     @classmethod
     def diff_message_from_exchange(
-        cls, msg: Dict[str, Any], timestamp: Optional[float] = None, metadata: Optional[Dict] = None
+        cls,
+        msg: Dict[str, Any],
+        timestamp: Optional[float] = None,
+        metadata: Optional[Dict] = None,
     ) -> OrderBookMessage:
         """
         Creates a diff message with the changes in the order book received from the exchange
@@ -83,7 +92,9 @@ class VertexOrderBook(OrderBook):
         )
 
     @classmethod
-    def trade_message_from_exchange(cls, msg: Dict[str, Any], metadata: Optional[Dict] = None):
+    def trade_message_from_exchange(
+        cls, msg: Dict[str, Any], metadata: Optional[Dict] = None
+    ):
         """
         Creates a trade message with the information from the trade event sent by the exchange
         :param msg: the trade event details sent by the exchange
@@ -97,7 +108,9 @@ class VertexOrderBook(OrderBook):
             OrderBookMessageType.TRADE,
             {
                 "trading_pair": msg["trading_pair"],
-                "trade_type": float(TradeType.BUY.value) if msg["is_taker_buyer"] else float(TradeType.SELL.value),
+                "trade_type": float(TradeType.BUY.value)
+                if msg["is_taker_buyer"]
+                else float(TradeType.SELL.value),
                 "trade_id": int(msg["timestamp"]),
                 "update_id": int(msg["timestamp"]),
                 "price": convert_from_x18(msg["price"]),

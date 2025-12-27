@@ -1,12 +1,12 @@
 from unittest import TestCase
 
-from hummingbot.connector.exchange.vertex.vertex_order_book import VertexOrderBook
+from hummingbot.connector.exchange.nado.nado_order_book import NadoOrderBook
 from hummingbot.core.data_type.order_book_message import OrderBookMessageType
 
 
-class VertexOrderBookTests(TestCase):
+class NadoOrderBookTests(TestCase):
     def test_snapshot_message_from_exchange(self):
-        snapshot_message = VertexOrderBook.snapshot_message_from_exchange_rest(
+        snapshot_message = NadoOrderBook.snapshot_message_from_exchange_rest(
             msg={
                 "data": {
                     "timestamp": 1640000000.0,
@@ -29,7 +29,7 @@ class VertexOrderBookTests(TestCase):
         self.assertEqual(12.0, snapshot_message.asks[0].amount)
 
     def test_diff_message_from_exchange(self):
-        diff_msg = VertexOrderBook.diff_message_from_exchange(
+        diff_msg = NadoOrderBook.diff_message_from_exchange(
             msg={
                 "last_max_timestamp": 1640000000000000000.0,
                 "product_id": 1,
@@ -64,7 +64,7 @@ class VertexOrderBookTests(TestCase):
             "taker_qty": "100000000000000000000",
         }
 
-        trade_message = VertexOrderBook.trade_message_from_exchange(
+        trade_message = NadoOrderBook.trade_message_from_exchange(
             msg=trade_update, metadata={"trading_pair": "COINALPHA-HBOT"}
         )
 

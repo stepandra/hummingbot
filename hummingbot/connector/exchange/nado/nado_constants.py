@@ -4,7 +4,7 @@ from typing import Any, Dict
 from hummingbot.core.api_throttler.data_types import LinkedLimitWeightPair, RateLimit
 from hummingbot.core.data_type.in_flight_order import OrderState
 
-# The max size of a digest is 66 characters (Vertex uses digests comprable to client order id).
+# The max size of a digest is 66 characters (Nado uses digests comparable to client order id).
 MAX_ORDER_ID_LEN = 66
 
 HEARTBEAT_TIME_INTERVAL = 30.0
@@ -13,41 +13,41 @@ ORDER_BOOK_DEPTH = 100
 
 VERSION = "0.0.1"
 
-EXCHANGE_NAME = "vertex"
+EXCHANGE_NAME = "nado"
 
-DEFAULT_DOMAIN = "vertex"
-TESTNET_DOMAIN = "vertex_testnet"
+DEFAULT_DOMAIN = "nado"
+TESTNET_DOMAIN = "nado_testnet"
 
-QUOTE = "USDC"
+QUOTE = "USDT0"
 
 BASE_URLS = {
-    DEFAULT_DOMAIN: "https://gateway.prod.vertexprotocol.com/v1",
-    TESTNET_DOMAIN: "https://gateway.sepolia-test.vertexprotocol.com/v1",
+    DEFAULT_DOMAIN: "https://gateway.prod.nado.xyz/v1",
+    TESTNET_DOMAIN: "https://gateway.test.nado.xyz/v1",
 }
 
 WSS_URLS = {
-    DEFAULT_DOMAIN: "wss://gateway.prod.vertexprotocol.com/v1/ws",
-    TESTNET_DOMAIN: "wss://gateway.sepolia-test.vertexprotocol.com/v1/ws",
+    DEFAULT_DOMAIN: "wss://gateway.prod.nado.xyz/v1/ws",
+    TESTNET_DOMAIN: "wss://gateway.test.nado.xyz/v1/ws",
 }
 
 ARCHIVE_INDEXER_URLS = {
-    DEFAULT_DOMAIN: "https://archive.prod.vertexprotocol.com/v1",
-    TESTNET_DOMAIN: "https://archive.sepolia-test.vertexprotocol.com/v1",
+    DEFAULT_DOMAIN: "https://archive.prod.nado.xyz/v1",
+    TESTNET_DOMAIN: "https://archive.test.nado.xyz/v1",
 }
 
 WS_SUBSCRIBE_URLS = {
-    DEFAULT_DOMAIN: "wss://gateway.prod.vertexprotocol.com/v1/subscribe",
-    TESTNET_DOMAIN: "wss://gateway.vertexprotocol-vertexprotocol.com/v1/subscribe",
+    DEFAULT_DOMAIN: "wss://gateway.prod.nado.xyz/v1/subscribe",
+    TESTNET_DOMAIN: "wss://gateway.test.nado.xyz/v1/subscribe",
 }
 
 CONTRACTS = {
-    DEFAULT_DOMAIN: "0xbbee07b3e8121227afcfe1e2b82772246226128e",
-    TESTNET_DOMAIN: "0x5956d6f55011678b2cab217cd21626f7668ba6c5",
+    DEFAULT_DOMAIN: "0x05ec92d78ed421f3d3ada77ffde167106565974e",
+    TESTNET_DOMAIN: "0x698d87105274292b5673367dec81874ce3633ac2",
 }
 
 CHAIN_IDS = {
-    DEFAULT_DOMAIN: 42161,
-    TESTNET_DOMAIN: 421613,
+    DEFAULT_DOMAIN: 57073,
+    TESTNET_DOMAIN: 763373,
 }
 
 HBOT_BROKER_ID = ""
@@ -94,77 +94,8 @@ DIFF_EVENT_TYPE = "book_depth"
 FILL_EVENT_TYPE = "fill"
 POSITION_CHANGE_EVENT_TYPE = "position_change"
 
-# Products
-# NOTE: Index 7+ is only on testnet
-PRODUCTS = {
-    0: {
-        "symbol": "USDC",
-        "market": None,
-        DEFAULT_DOMAIN: "0x0000000000000000000000000000000000000000",
-        TESTNET_DOMAIN: "0x0000000000000000000000000000000000000000",
-    },
-    1: {
-        "symbol": "wBTC",
-        "market": "wBTC/USDC",
-        DEFAULT_DOMAIN: "0x70e5911371472e406f1291c621d1c8f207764d73",
-        TESTNET_DOMAIN: "0x939b0915f9c3b657b9e9a095269a0078dd587491",
-    },
-    2: {
-        "symbol": "BTC-PERP",
-        "market": "wBTC/USDC",
-        DEFAULT_DOMAIN: "0xf03f457a30e598d5020164a339727ef40f2b8fbc",
-        TESTNET_DOMAIN: "0x291b578ff99bfef1706a2018d9dfdd98773e4f3e",
-    },
-    3: {
-        "symbol": "wETH",
-        "market": "wETH/USDC",
-        DEFAULT_DOMAIN: "0x1c6281a78aa0ed88949c319cba5f0f0de2ce8353",
-        TESTNET_DOMAIN: "0x4008c7b762d7000034207bdef628a798065c3dcc",
-    },
-    4: {
-        "symbol": "ETH-PERP",
-        "market": "wETH/USDC",
-        DEFAULT_DOMAIN: "0xfe653438a1a4a7f56e727509c341d60a7b54fa91",
-        TESTNET_DOMAIN: "0xe5106c497f8398ee8d1d6d246f08c125245d19ff",
-    },
-    5: {
-        "symbol": "ARB",
-        "market": "ARB/USDC",
-        DEFAULT_DOMAIN: "0xb6304e9a6ca241376a5fc9294daa8fca65ddcdcd",
-        TESTNET_DOMAIN: "0x49eff6d3de555be7a039d0b86471e3cb454b35de",
-    },
-    6: {
-        "symbol": "ARB-PERP",
-        "market": "ARB/USDC",
-        DEFAULT_DOMAIN: "0x01ec802ae0ab1b2cc4f028b9fe6eb954aef06ed1",
-        TESTNET_DOMAIN: "0xc5f223f12d091fba16141d4eeb5d39c5e0e2577c",
-    },
-    # TESTNET
-    7: {
-        "symbol": "ARB2",
-        "market": "ARB2/USDC",
-        DEFAULT_DOMAIN: None,
-        TESTNET_DOMAIN: "0xf9144ddc09bd6961cbed631f8be708d2d1e87f57",
-    },
-    8: {
-        "symbol": "ARB-PERP2",
-        "market": "ARB2/USDC",
-        DEFAULT_DOMAIN: None,
-        TESTNET_DOMAIN: "0xa0c85ffadceba288fbcba1dcb780956c01b25cdf",
-    },
-    9: {
-        "symbol": "ARB-PERP2",
-        "market": "ARB2/USDC",
-        DEFAULT_DOMAIN: None,
-        TESTNET_DOMAIN: "0xa0c85ffadceba288fbcba1dcb780956c01b25cdf",
-    },
-    10: {
-        "symbol": "ARB-PERP2",
-        "market": "ARB2/USDC",
-        DEFAULT_DOMAIN: None,
-        TESTNET_DOMAIN: "0xa0c85ffadceba288fbcba1dcb780956c01b25cdf",
-    },
-}
+# Products are fetched dynamically from the symbols and all_products queries.
+PRODUCTS = {}
 
 # OrderStates
 ORDER_STATE = {
@@ -181,7 +112,10 @@ ALL_ENDPOINTS_LIMIT = "All"
 RATE_LIMITS = [
     RateLimit(limit_id=ALL_ENDPOINTS_LIMIT, limit=600, time_interval=10),
     RateLimit(
-        limit_id=INDEXER_PATH_URL, limit=60, time_interval=1, linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)]
+        limit_id=INDEXER_PATH_URL,
+        limit=60,
+        time_interval=1,
+        linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
     ),
     RateLimit(
         limit_id=STATUS_REQUEST_TYPE,
@@ -253,7 +187,7 @@ RATE_LIMITS = [
         linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
     ),
     # NOTE: For spot with no leverage, there are different limits.
-    # Review https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/place-order
+    # Review https://docs.nado.xyz/developer-resources/api/gateway/executes/place-order
     RateLimit(
         limit_id=PLACE_ORDER_METHOD,
         limit=10,
@@ -267,7 +201,7 @@ RATE_LIMITS = [
         linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
     ),
     # NOTE: We're only providing one (1) digest at a time currently.
-    # https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/cancel-orders
+    # https://docs.nado.xyz/developer-resources/api/gateway/executes/cancel-orders
     RateLimit(
         limit_id=CANCEL_ORDERS_METHOD,
         limit=600,
@@ -275,7 +209,7 @@ RATE_LIMITS = [
         linked_limits=[LinkedLimitWeightPair(ALL_ENDPOINTS_LIMIT)],
     ),
     # NOTE: This isn't currently in use.
-    # https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/cancel-product-orders
+    # https://docs.nado.xyz/developer-resources/api/gateway/executes/cancel-product-orders
     RateLimit(
         limit_id=CANCEL_ALL_METHOD,
         limit=2,
@@ -285,7 +219,7 @@ RATE_LIMITS = [
 ]
 
 """
-https://vertex-protocol.gitbook.io/docs/developer-resources/api/api-errors
+https://docs.nado.xyz/developer-resources/api/gateway/errors
 """
 ERRORS: Dict[int, Any] = {
     1000: {
@@ -297,7 +231,7 @@ ERRORS: Dict[int, Any] = {
     1001: {
         "code": 1001,
         "error_value": "BlacklistedAddress",
-        "description": "This address has been blacklisted from accessing the sequencer due to a violation of the Terms of Service. If you believe this is an error, please contact the Vertex team for assistance.",
+        "description": "This address has been blacklisted from accessing the sequencer due to a violation of the Terms of Service. If you believe this is an error, please contact the Nado team for assistance.",
         "message": "",
     },
     1002: {

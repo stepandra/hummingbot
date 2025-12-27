@@ -1,7 +1,7 @@
 import time
 from typing import Optional
 
-import hummingbot.connector.exchange.vertex.vertex_constants as CONSTANTS
+import hummingbot.connector.exchange.nado.nado_constants as CONSTANTS
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.web_assistant.auth import AuthBase
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
@@ -11,7 +11,7 @@ def public_rest_url(path_url: str, domain: str = CONSTANTS.DEFAULT_DOMAIN) -> st
     """
     Creates a full URL for provided public REST endpoint
     :param path_url: a public REST endpoint
-    :param domain: the Vertex domain to connect to ("mainnet" or "testnet"). The default value is "mainnet"
+    :param domain: the Nado domain to connect to ("mainnet" or "testnet"). The default value is "mainnet"
 
     :return: the full URL to the endpoint
     """
@@ -46,6 +46,8 @@ def create_throttler() -> AsyncThrottler:
     return AsyncThrottler(CONSTANTS.RATE_LIMITS)
 
 
-async def get_current_server_time(throttler: AsyncThrottler, domain: str = CONSTANTS.DEFAULT_DOMAIN) -> float:
+async def get_current_server_time(
+    throttler: AsyncThrottler, domain: str = CONSTANTS.DEFAULT_DOMAIN
+) -> float:
     server_time = float(time.time())
     return server_time

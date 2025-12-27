@@ -8,16 +8,17 @@ class EIP712Domain(EIP712Struct):
     verifyingContract = Address()
 
 
-# https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/place-order
+# https://docs.nado.xyz/developer-resources/api/gateway/executes/place-order
 class Order(EIP712Struct):
     sender = Bytes(32)
     priceX18 = Int(128)
     amount = Int(128)
     expiration = Uint(64)
     nonce = Uint(64)
+    appendix = Uint(128)
 
 
-# https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/cancel-orders
+# https://docs.nado.xyz/developer-resources/api/gateway/executes/cancel-orders
 class Cancellation(EIP712Struct):
     sender = Bytes(32)
     productIds = Array(Uint(32))
@@ -25,7 +26,7 @@ class Cancellation(EIP712Struct):
     nonce = Uint(64)
 
 
-# https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/cancel-product-orders
+# https://docs.nado.xyz/developer-resources/api/gateway/executes/cancel-product-orders
 class CancellationProducts(EIP712Struct):
     sender = Bytes(32)
     productIds = Array(Uint(32))

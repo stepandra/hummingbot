@@ -1,40 +1,48 @@
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from hummingbot.connector.exchange.vertex import (
-    vertex_constants as CONSTANTS,
-    vertex_utils as utils,
-    vertex_web_utils as web_utils,
+from hummingbot.connector.exchange.nado import (
+    nado_constants as CONSTANTS,
 )
-from hummingbot.connector.exchange.vertex.vertex_auth import VertexAuth
+from hummingbot.connector.exchange.nado import (
+    nado_utils as utils,
+)
+from hummingbot.connector.exchange.nado import (
+    nado_web_utils as web_utils,
+)
+from hummingbot.connector.exchange.nado.nado_auth import NadoAuth
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
-from hummingbot.core.data_type.user_stream_tracker_data_source import UserStreamTrackerDataSource
+from hummingbot.core.data_type.user_stream_tracker_data_source import (
+    UserStreamTrackerDataSource,
+)
 from hummingbot.core.web_assistant.connections.data_types import WSJSONRequest
 from hummingbot.core.web_assistant.web_assistants_factory import WebAssistantsFactory
 from hummingbot.core.web_assistant.ws_assistant import WSAssistant
 
 if TYPE_CHECKING:
-    from hummingbot.connector.exchange.vertex.vertex_exchange import VertexExchange
+    from hummingbot.connector.exchange.nado.nado_exchange import NadoExchange
 
 
-class VertexAPIUserStreamDataSource(UserStreamTrackerDataSource):
+class NadoAPIUserStreamDataSource(UserStreamTrackerDataSource):
     def __init__(
         self,
-        auth: VertexAuth,
+        auth: NadoAuth,
         trading_pairs: List[str],
-        connector: "VertexExchange",
+        connector: "NadoExchange",
         domain: str = CONSTANTS.DEFAULT_DOMAIN,
         api_factory: Optional[WebAssistantsFactory] = None,
         throttler: Optional[AsyncThrottler] = None,
     ):
         super().__init__()
         self._connector = connector
-        self._auth: VertexAuth = auth
+        self._auth: NadoAuth = auth
         self._trading_pairs = trading_pairs
         self._last_recv_time: float = 0
         self._domain = domain
         self._throttler = throttler
-        self._api_factory = api_factory or web_utils.build_api_factory(throttler=self._throttler, auth=self._auth)
+        self._api_factory = api_factory or web_utils.build_api_factory(
+            throttler=self._throttler, auth=self._auth
+        )
         self._ping_interval = 0
         self._last_ws_message_sent_timestamp = 0
 
@@ -77,28 +85,41 @@ class VertexAPIUserStreamDataSource(UserStreamTrackerDataSource):
                     "id": product_id,
                 }
 
-                subscribe_fill_request: WSJSONRequest = WSJSONRequest(payload=fill_payload)
-                subscribe_position_change_request: WSJSONRequest = WSJSONRequest(payload=position_change_payload)
+                subscribe_fill_request: WSJSONRequest = WSJSONRequest(
+                    payload=fill_payload
+                )
+                subscribe_position_change_request: WSJSONRequest = WSJSONRequest(
+                    payload=position_change_payload
+                )
                 await websocket_assistant.send(subscribe_fill_request)
                 await websocket_assistant.send(subscribe_position_change_request)
 
                 self._last_ws_message_sent_timestamp = self._time()
 
-                self.logger().info(f"Subscribed to subaccount fill and position change channels of {trading_pair}...")
+                self.logger().info(
+                    f"Subscribed to subaccount fill and position change channels of {trading_pair}..."
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
             self.logger().error(
-                "Unexpected error occurred subscribing to trading and order book stream...", exc_info=True
+                "Unexpected error occurred subscribing to trading and order book stream...",
+                exc_info=True,
             )
             raise
 
-    async def _process_websocket_messages(self, websocket_assistant: WSAssistant, queue: asyncio.Queue):
+    async def _process_websocket_messages(
+        self, websocket_assistant: WSAssistant, queue: asyncio.Queue
+    ):
         while True:
             try:
-                seconds_until_next_ping = self._ping_interval - (self._time() - self._last_ws_message_sent_timestamp)
+                seconds_until_next_ping = self._ping_interval - (
+                    self._time() - self._last_ws_message_sent_timestamp
+                )
                 await asyncio.wait_for(
-                    super()._process_websocket_messages(websocket_assistant=websocket_assistant, queue=queue),
+                    super()._process_websocket_messages(
+                        websocket_assistant=websocket_assistant, queue=queue
+                    ),
                     timeout=seconds_until_next_ping,
                 )
             except asyncio.TimeoutError:
@@ -106,10 +127,13 @@ class VertexAPIUserStreamDataSource(UserStreamTrackerDataSource):
                 await websocket_assistant.ping()
                 self._last_ws_message_sent_timestamp = ping_time
 
-    async def _process_event_message(self, event_message: Dict[str, Any], queue: asyncio.Queue):
+    async def _process_event_message(
+        self, event_message: Dict[str, Any], queue: asyncio.Queue
+    ):
         if (
             len(event_message) > 0
             and "type" in event_message
-            and event_message.get("type") in [CONSTANTS.POSITION_CHANGE_EVENT_TYPE, CONSTANTS.FILL_EVENT_TYPE]
+            and event_message.get("type")
+            in [CONSTANTS.POSITION_CHANGE_EVENT_TYPE, CONSTANTS.FILL_EVENT_TYPE]
         ):
             queue.put_nowait(event_message)

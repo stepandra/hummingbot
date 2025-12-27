@@ -168,7 +168,9 @@ Currently, the master branch of Hummingbot also includes the following exchange 
 | [SushiSwap](https://hummingbot.org/exchanges/gateway/sushiswap/) | AMM DEX | AMM | `sushiswap` | - |
 | [Trader Joe](https://hummingbot.org/exchanges/gateway/traderjoe/) | AMM DEX | AMM | `traderjoe` | - |
 | [Uniswap](https://hummingbot.org/exchanges/gateway/uniswap/) | AMM DEX | Router, AMM, CLMM | `uniswap` | - |
-| [Vertex](https://hummingbot.org/exchanges/vertex/) | CLOB DEX | Spot | `vertex` | - |
+| Lighter | CLOB DEX | Perpetual | `lighter_perpetual` | - |
+| Vest | CLOB CEX | Perpetual | `vest_perpetual` | - |
+| [Nado](https://hummingbot.org/exchanges/nado/) | CLOB DEX | Spot | `nado` | - |
 
 ## Other Hummingbot Repos
 

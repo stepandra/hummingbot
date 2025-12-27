@@ -1,17 +1,18 @@
 import numbers
+import time
 from decimal import Decimal
 from random import randint
 from typing import Any, Dict, Optional
 
 from pydantic import ConfigDict, Field, SecretStr
 
-import hummingbot.connector.exchange.vertex.vertex_constants as CONSTANTS
+import hummingbot.connector.exchange.nado.nado_constants as CONSTANTS
 from hummingbot.client.config.config_data_types import BaseConnectorConfigMap
 from hummingbot.core.data_type.trade_fee import TradeFeeSchema
 
 CENTRALIZED = True
 USE_ETHEREUM_WALLET = False
-EXAMPLE_PAIR = "WBTC-USDC"
+EXAMPLE_PAIR = "WBTC-USDT0"
 DEFAULT_FEES = TradeFeeSchema(
     maker_percent_fee_decimal=Decimal("0.0"),
     taker_percent_fee_decimal=Decimal("0.0002"),
@@ -30,7 +31,9 @@ def convert_timestamp(timestamp: Any) -> float:
     return float(timestamp) / 1e9
 
 
-def trading_pair_to_product_id(trading_pair: str, exchange_market_info: Dict, is_perp: Optional[bool] = False) -> int:
+def trading_pair_to_product_id(
+    trading_pair: str, exchange_market_info: Dict, is_perp: Optional[bool] = False
+) -> int:
     tp = trading_pair.replace("-", "/")
     for product_id in exchange_market_info:
         if is_perp and "perp" not in exchange_market_info[product_id]["symbol"].lower():
@@ -41,7 +44,7 @@ def trading_pair_to_product_id(trading_pair: str, exchange_market_info: Dict, is
 
 
 def market_to_trading_pair(market: str) -> str:
-    """Converts a market symbol from Vertex to a trading pair."""
+    """Converts a market symbol from Nado to a trading pair."""
     return market.replace("/", "-")
 
 
@@ -67,7 +70,9 @@ def convert_from_x18(data: Any, precision: Optional[Decimal] = None) -> Any:
         for i in range(0, len(data)):
             data[i] = convert_from_x18(data[i], precision)
     else:
-        raise TypeError("Data is of unsupported type for convert_from_x18 to process", data)
+        raise TypeError(
+            "Data is of unsupported type for convert_from_x18 to process", data
+        )
     return data
 
 
@@ -93,32 +98,17 @@ def convert_to_x18(data: Any, precision: Optional[Decimal] = None) -> Any:
         for i in range(0, len(data)):
             data[i] = convert_to_x18(data[i], precision)
     else:
-        raise TypeError("Data is of unsupported type for convert_to_x18 to process", data)
+        raise TypeError(
+            "Data is of unsupported type for convert_to_x18 to process", data
+        )
     return data
 
 
-def generate_expiration(timestamp: float = None, order_type: Optional[str] = None) -> str:
-    default_max_time = 8640000000000000  # NOTE: Forever
-    default_day_time = 86400
-    # Default significant bit is 0 for GTC
-    # https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes/place-order
-    sig_bit = 0
-
-    if order_type == CONSTANTS.TIME_IN_FORCE_IOC:
-        sig_bit = 1
-    elif order_type == CONSTANTS.TIME_IN_FORCE_FOK:
-        sig_bit = 2
-    elif order_type == CONSTANTS.TIME_IN_FORCE_POSTONLY:
-        sig_bit = 3
-
-    # NOTE: We can setup maxtime
-    expiration = str(default_max_time | (sig_bit << 62))
-
-    if timestamp:
-        unix_epoch = int(timestamp)
-        expiration = str((unix_epoch + default_day_time) | (sig_bit << 62))
-
-    return expiration
+def generate_expiration(timestamp: float = None, expiry_seconds: int = 86400) -> str:
+    if timestamp is None:
+        timestamp = time.time()
+    unix_epoch = int(timestamp)
+    return str(unix_epoch + expiry_seconds)
 
 
 def generate_nonce(timestamp: float, expiry_ms: int = 90) -> int:
@@ -130,11 +120,27 @@ def generate_nonce(timestamp: float, expiry_ms: int = 90) -> int:
 def convert_address_to_sender(address: str) -> str:
     # NOTE: the sender address includes the subaccount, which is "default" by default, you cannot interact with
     # subaccounts outside of default on the UI currently.
-    # https://vertex-protocol.gitbook.io/docs/developer-resources/api/websocket-rest-api/executes#signing
+    # https://docs.nado.xyz/developer-resources/api/gateway/signing
     if isinstance(address, str):
         default_12bytes = "64656661756c740000000000"
         return address + default_12bytes
     raise TypeError("Address must be of type string")
+
+
+def generate_order_verifying_contract(product_id: int) -> str:
+    be_bytes = product_id.to_bytes(20, byteorder="big", signed=False)
+    return "0x" + be_bytes.hex()
+
+
+def build_order_appendix(order_type: str, version: int = 1) -> int:
+    order_type_map = {
+        CONSTANTS.TIME_IN_FORCE_GTC: 0,
+        CONSTANTS.TIME_IN_FORCE_IOC: 1,
+        CONSTANTS.TIME_IN_FORCE_FOK: 2,
+        CONSTANTS.TIME_IN_FORCE_POSTONLY: 3,
+    }
+    order_type_value = order_type_map.get(order_type, 0)
+    return (version & 0xFF) | ((order_type_value & 0x3) << 9)
 
 
 def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
@@ -144,58 +150,58 @@ def is_exchange_information_valid(exchange_info: Dict[str, Any]) -> bool:
     return True
 
 
-class VertexConfigMap(BaseConnectorConfigMap):
-    connector: str = "vertex"
-    vertex_arbitrum_private_key: SecretStr = Field(
+class NadoConfigMap(BaseConnectorConfigMap):
+    connector: str = "nado"
+    nado_ink_private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum private key",
+            "prompt": "Enter your Ink private key",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
-        }
+        },
     )
-    vertex_arbitrum_address: str = Field(
+    nado_ink_address: str = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum wallet address",
+            "prompt": "Enter your Ink wallet address",
             "is_secure": False,
             "is_connect_key": True,
             "prompt_on_new": True,
-        }
+        },
     )
-    model_config = ConfigDict(title="vertex")
+    model_config = ConfigDict(title="nado")
 
 
-KEYS = VertexConfigMap.model_construct()
+KEYS = NadoConfigMap.model_construct()
 
 
-class VertexTestnetConfigMap(BaseConnectorConfigMap):
-    connector: str = "vertex_testnet"
-    vertex_testnet_arbitrum_private_key: SecretStr = Field(
+class NadoTestnetConfigMap(BaseConnectorConfigMap):
+    connector: str = "nado_testnet"
+    nado_testnet_ink_private_key: SecretStr = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum TESTNET private key",
+            "prompt": "Enter your Ink TESTNET private key",
             "is_secure": True,
             "is_connect_key": True,
             "prompt_on_new": True,
-        }
+        },
     )
-    vertex_testnet_arbitrum_address: str = Field(
+    nado_testnet_ink_address: str = Field(
         default=...,
         json_schema_extra={
-            "prompt": "Enter your Arbitrum TESTNET wallet address",
+            "prompt": "Enter your Ink TESTNET wallet address",
             "is_secure": False,
             "is_connect_key": True,
             "prompt_on_new": True,
-        }
+        },
     )
-    model_config = ConfigDict(title="vertex_testnet")
+    model_config = ConfigDict(title="nado_testnet")
 
 
-OTHER_DOMAINS = ["vertex_testnet"]
-OTHER_DOMAINS_PARAMETER = {"vertex_testnet": "vertex_testnet"}
-OTHER_DOMAINS_EXAMPLE_PAIR = {"vertex_testnet": "WBTC-USDC"}
-OTHER_DOMAINS_DEFAULT_FEES = {"vertex_testnet": DEFAULT_FEES}
+OTHER_DOMAINS = ["nado_testnet"]
+OTHER_DOMAINS_PARAMETER = {"nado_testnet": "nado_testnet"}
+OTHER_DOMAINS_EXAMPLE_PAIR = {"nado_testnet": "WBTC-USDT0"}
+OTHER_DOMAINS_DEFAULT_FEES = {"nado_testnet": DEFAULT_FEES}
 
-OTHER_DOMAINS_KEYS = {"vertex_testnet": VertexTestnetConfigMap.model_construct()}
+OTHER_DOMAINS_KEYS = {"nado_testnet": NadoTestnetConfigMap.model_construct()}

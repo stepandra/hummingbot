@@ -1,19 +1,23 @@
 import asyncio
 import json
-from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 from typing import Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from aioresponses import aioresponses
 from bidict import bidict
 
-from hummingbot.connector.exchange.vertex import vertex_constants as CONSTANTS
-from hummingbot.connector.exchange.vertex.vertex_api_order_book_data_source import VertexAPIOrderBookDataSource
-from hummingbot.connector.exchange.vertex.vertex_exchange import VertexExchange
-from hummingbot.connector.test_support.network_mocking_assistant import NetworkMockingAssistant
+from hummingbot.connector.exchange.nado import nado_constants as CONSTANTS
+from hummingbot.connector.exchange.nado.nado_api_order_book_data_source import (
+    NadoAPIOrderBookDataSource,
+)
+from hummingbot.connector.exchange.nado.nado_exchange import NadoExchange
+from hummingbot.connector.test_support.network_mocking_assistant import (
+    NetworkMockingAssistant,
+)
 from hummingbot.connector.time_synchronizer import TimeSynchronizer
 from hummingbot.core.api_throttler.async_throttler import AsyncThrottler
 from hummingbot.core.data_type.order_book_message import OrderBookMessage
+from test.isolated_asyncio_wrapper_test_case import IsolatedAsyncioWrapperTestCase
 
 # QUEUE KEYS FOR WEBSOCKET DATA PROCESSING
 TRADE_KEY = "trade"
@@ -21,15 +25,15 @@ ORDER_BOOK_DIFF_KEY = "order_book_diff"
 ORDER_BOOK_SNAPSHOT_KEY = "order_book_snapshot"
 
 
-class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
+class TestNadoAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
     # logging.Level required to receive logs from the data source logger
     level = 0
 
     @classmethod
     def setUpClass(cls) -> None:
         super().setUpClass()
-        cls.base_asset = "wBTC"
-        cls.quote_asset = "USDC"
+        cls.base_asset = "WBTC"
+        cls.quote_asset = "USDT0"
         cls.trading_pair = f"{cls.base_asset}-{cls.quote_asset}"
         cls.ex_trading_pair = cls.base_asset + cls.quote_asset
         cls.domain = CONSTANTS.TESTNET_DOMAIN
@@ -42,9 +46,9 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         self.mocking_assistant = NetworkMockingAssistant(self.local_event_loop)
 
         # NOTE: RANDOM KEYS GENERATED JUST FOR UNIT TESTS
-        self.connector = VertexExchange(
-            vertex_arbitrum_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",
-            vertex_arbitrum_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
+        self.connector = NadoExchange(
+            nado_ink_address="0x2162Db26939B9EAF0C5404217774d166056d31B5",
+            nado_ink_private_key="5500eb16bf3692840e04fb6a63547b9a80b75d9cbb36b43ca5662127d4c19c83",  # noqa: mock
             trading_pairs=[self.trading_pair],
             domain=self.domain,
         )
@@ -52,7 +56,7 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         self.throttler = AsyncThrottler(CONSTANTS.RATE_LIMITS)
         self.time_synchronnizer = TimeSynchronizer()
         self.time_synchronnizer.add_time_offset_ms_sample(1000)
-        self.ob_data_source = VertexAPIOrderBookDataSource(
+        self.ob_data_source = NadoAPIOrderBookDataSource(
             trading_pairs=[self.trading_pair],
             connector=self.connector,
             api_factory=self.connector._web_assistants_factory,
@@ -60,9 +64,13 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
             throttler=self.throttler,
         )
 
-        self.connector._exchange_market_info = {self.domain: self.get_exchange_market_info_mock()}
+        self.connector._exchange_market_info = {
+            self.domain: self.get_exchange_market_info_mock()
+        }
 
-        self._original_full_order_book_reset_time = self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS
+        self._original_full_order_book_reset_time = (
+            self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS
+        )
         self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS = -1
 
         self.ob_data_source.logger().setLevel(1)
@@ -70,18 +78,25 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
 
         self.resume_test_event = asyncio.Event()
 
-        self.connector._set_trading_pair_symbol_map(bidict({self.ex_trading_pair: self.trading_pair}))
+        self.connector._set_trading_pair_symbol_map(
+            bidict({self.ex_trading_pair: self.trading_pair})
+        )
 
     def tearDown(self) -> None:
         self.async_task and self.async_task.cancel()
-        self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS = self._original_full_order_book_reset_time
+        self.ob_data_source.FULL_ORDER_BOOK_RESET_DELTA_SECONDS = (
+            self._original_full_order_book_reset_time
+        )
         super().tearDown()
 
     def handle(self, record):
         self.log_records.append(record)
 
     def _is_logged(self, log_level: str, message: str) -> bool:
-        return any(record.levelname == log_level and record.getMessage() == message for record in self.log_records)
+        return any(
+            record.levelname == log_level and record.getMessage() == message
+            for record in self.log_records
+        )
 
     def _create_exception_and_unlock_test_with_event(self, exception):
         self.resume_test_event.set()
@@ -130,8 +145,8 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
                     "collected_fees": "56936143536016463686263",
                     "lp_spread_x18": "3000000000000000",
                 },
-                "symbol": "wBTC",
-                "market": "wBTC/USDC",
+                "symbol": "WBTC",
+                "market": "WBTC/USDT0",
                 "contract": "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
             },
         }
@@ -183,8 +198,8 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
                             "collected_fees": "56936143536016463686263",
                             "lp_spread_x18": "3000000000000000",
                         },
-                        "symbol": "wBTC",
-                        "market": "wBTC/USDC",
+                        "symbol": "WBTC",
+                        "market": "WBTC/USDT0",
                         "contract": "0x939b0915f9c3b657b9e9a095269a0078dd587491",  # noqa: mock
                     },
                 ],
@@ -262,50 +277,85 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         self.assertEqual(int(resp["data"]["timestamp"]), ask_entries[0].update_id)
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    async def test_listen_for_subscriptions_subscribes_to_trades_and_depth(self, ws_connect_mock):
+    async def test_listen_for_subscriptions_subscribes_to_trades_and_depth(
+        self, ws_connect_mock
+    ):
         ws_connect_mock.return_value = self.mocking_assistant.create_websocket_mock()
 
-        result_subscribe_trades = {"method": "subscribe", "stream": {"type": "trade", "product_id": 1}, "id": 1}
+        result_subscribe_trades = {
+            "method": "subscribe",
+            "stream": {"type": "trade", "product_id": 1},
+            "id": 1,
+        }
 
-        result_subscribe_depth = {"method": "subscribe", "stream": {"type": "book_depth", "product_id": 1}, "id": 1}
+        result_subscribe_depth = {
+            "method": "subscribe",
+            "stream": {"type": "book_depth", "product_id": 1},
+            "id": 1,
+        }
 
         self.mocking_assistant.add_websocket_aiohttp_message(
-            websocket_mock=ws_connect_mock.return_value, message=json.dumps(result_subscribe_trades)
+            websocket_mock=ws_connect_mock.return_value,
+            message=json.dumps(result_subscribe_trades),
         )
         self.mocking_assistant.add_websocket_aiohttp_message(
-            websocket_mock=ws_connect_mock.return_value, message=json.dumps(result_subscribe_depth)
+            websocket_mock=ws_connect_mock.return_value,
+            message=json.dumps(result_subscribe_depth),
         )
 
-        self.listening_task = self.local_event_loop.create_task(self.ob_data_source.listen_for_subscriptions())
+        self.listening_task = self.local_event_loop.create_task(
+            self.ob_data_source.listen_for_subscriptions()
+        )
 
-        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(ws_connect_mock.return_value)
+        await self.mocking_assistant.run_until_all_aiohttp_messages_delivered(
+            ws_connect_mock.return_value
+        )
 
-        sent_subscription_messages = self.mocking_assistant.json_messages_sent_through_websocket(
-            websocket_mock=ws_connect_mock.return_value
+        sent_subscription_messages = (
+            self.mocking_assistant.json_messages_sent_through_websocket(
+                websocket_mock=ws_connect_mock.return_value
+            )
         )
 
         self.assertEqual(2, len(sent_subscription_messages))
-        expected_trade_subscription = {"method": "subscribe", "stream": {"type": "trade", "product_id": 1}, "id": 1}
+        expected_trade_subscription = {
+            "method": "subscribe",
+            "stream": {"type": "trade", "product_id": 1},
+            "id": 1,
+        }
         self.assertEqual(expected_trade_subscription, sent_subscription_messages[0])
-        expected_diff_subscription = {"method": "subscribe", "stream": {"type": "book_depth", "product_id": 1}, "id": 1}
+        expected_diff_subscription = {
+            "method": "subscribe",
+            "stream": {"type": "book_depth", "product_id": 1},
+            "id": 1,
+        }
         self.assertEqual(expected_diff_subscription, sent_subscription_messages[1])
 
         self.assertTrue(
             self._is_logged(
-                "INFO", f"Subscribed to public trade and order book diff channels of {self.trading_pair}..."
+                "INFO",
+                f"Subscribed to public trade and order book diff channels of {self.trading_pair}...",
             )
         )
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    @patch("hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep")
-    async def test_listen_for_subscriptions_raises_cancel_exception(self, _, ws_connect_mock):
+    @patch(
+        "hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep"
+    )
+    async def test_listen_for_subscriptions_raises_cancel_exception(
+        self, _, ws_connect_mock
+    ):
         ws_connect_mock.side_effect = asyncio.CancelledError
         with self.assertRaises(asyncio.CancelledError):
             await self.ob_data_source.listen_for_subscriptions()
 
     @patch("aiohttp.ClientSession.ws_connect", new_callable=AsyncMock)
-    @patch("hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep")
-    async def test_listen_for_subscriptions_logs_exception_details(self, sleep_mock, ws_connect_mock):
+    @patch(
+        "hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep"
+    )
+    async def test_listen_for_subscriptions_logs_exception_details(
+        self, sleep_mock, ws_connect_mock
+    ):
         sleep_mock.side_effect = asyncio.CancelledError
         ws_connect_mock.side_effect = Exception("TEST ERROR.")
 
@@ -314,7 +364,8 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
 
         self.assertTrue(
             self._is_logged(
-                "ERROR", "Unexpected error occurred when listening to order book streams. Retrying in 5 seconds..."
+                "ERROR",
+                "Unexpected error occurred when listening to order book streams. Retrying in 5 seconds...",
             )
         )
 
@@ -326,7 +377,9 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         msg_queue: asyncio.Queue = asyncio.Queue()
 
         with self.assertRaises(asyncio.CancelledError):
-            await self.ob_data_source.listen_for_trades(self.local_event_loop, msg_queue)
+            await self.ob_data_source.listen_for_trades(
+                self.local_event_loop, msg_queue
+            )
 
     async def test_listen_for_trades_logs_exception(self):
         incomplete_resp = {
@@ -346,11 +399,18 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         msg_queue: asyncio.Queue = asyncio.Queue()
 
         try:
-            await self.ob_data_source.listen_for_trades(self.local_event_loop, msg_queue)
+            await self.ob_data_source.listen_for_trades(
+                self.local_event_loop, msg_queue
+            )
         except asyncio.CancelledError:
             pass
 
-        self.assertTrue(self._is_logged("ERROR", "Unexpected error when processing public trade updates from exchange"))
+        self.assertTrue(
+            self._is_logged(
+                "ERROR",
+                "Unexpected error when processing public trade updates from exchange",
+            )
+        )
 
     async def test_listen_for_trades_successful(self):
         mock_queue = AsyncMock()
@@ -388,7 +448,9 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         msg_queue: asyncio.Queue = asyncio.Queue()
 
         with self.assertRaises(asyncio.CancelledError):
-            await self.ob_data_source.listen_for_order_book_diffs(self.local_event_loop, msg_queue)
+            await self.ob_data_source.listen_for_order_book_diffs(
+                self.local_event_loop, msg_queue
+            )
 
     async def test_listen_for_order_book_diffs_logs_exception(self):
         incomplete_resp = {
@@ -407,12 +469,17 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         msg_queue: asyncio.Queue = asyncio.Queue()
 
         try:
-            await self.ob_data_source.listen_for_order_book_diffs(self.local_event_loop, msg_queue)
+            await self.ob_data_source.listen_for_order_book_diffs(
+                self.local_event_loop, msg_queue
+            )
         except asyncio.CancelledError:
             pass
 
         self.assertTrue(
-            self._is_logged("ERROR", "Unexpected error when processing public order book updates from exchange")
+            self._is_logged(
+                "ERROR",
+                "Unexpected error when processing public order book updates from exchange",
+            )
         )
 
     async def test_listen_for_order_book_diffs_successful(self):
@@ -433,7 +500,9 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
 
         try:
             self.listening_task = self.local_event_loop.create_task(
-                self.ob_data_source.listen_for_order_book_diffs(self.local_event_loop, msg_queue)
+                self.ob_data_source.listen_for_order_book_diffs(
+                    self.local_event_loop, msg_queue
+                )
             )
         except asyncio.CancelledError:
             pass
@@ -443,16 +512,24 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         self.assertTrue(diff_event["last_max_timestamp"], msg.update_id)
 
     @aioresponses()
-    async def test_listen_for_order_book_snapshots_cancelled_when_fetching_snapshot(self, mock_api):
+    async def test_listen_for_order_book_snapshots_cancelled_when_fetching_snapshot(
+        self, mock_api
+    ):
         url = f"{CONSTANTS.BASE_URLS[self.domain]}/query?depth={CONSTANTS.ORDER_BOOK_DEPTH}&product_id=1&type={CONSTANTS.MARKET_LIQUIDITY_REQUEST_TYPE}"
         mock_api.get(url, exception=asyncio.CancelledError)
 
         with self.assertRaises(asyncio.CancelledError):
-            await self.ob_data_source.listen_for_order_book_snapshots(self.local_event_loop, asyncio.Queue())
+            await self.ob_data_source.listen_for_order_book_snapshots(
+                self.local_event_loop, asyncio.Queue()
+            )
 
     @aioresponses()
-    @patch("hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep")
-    async def test_listen_for_order_book_snapshots_log_exception(self, mock_api, sleep_mock):
+    @patch(
+        "hummingbot.core.data_type.order_book_tracker_data_source.OrderBookTrackerDataSource._sleep"
+    )
+    async def test_listen_for_order_book_snapshots_log_exception(
+        self, mock_api, sleep_mock
+    ):
         msg_queue: asyncio.Queue = asyncio.Queue()
         sleep_mock.side_effect = asyncio.CancelledError
 
@@ -460,12 +537,17 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         mock_api.get(url, exception=Exception)
 
         try:
-            await self.ob_data_source.listen_for_order_book_snapshots(self.local_event_loop, msg_queue)
+            await self.ob_data_source.listen_for_order_book_snapshots(
+                self.local_event_loop, msg_queue
+            )
         except asyncio.CancelledError:
             pass
 
         self.assertTrue(
-            self._is_logged("ERROR", f"Unexpected error fetching order book snapshot for {self.trading_pair}.")
+            self._is_logged(
+                "ERROR",
+                f"Unexpected error fetching order book snapshot for {self.trading_pair}.",
+            )
         )
 
     @aioresponses()
@@ -481,7 +563,9 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
         self.ob_data_source._sleep = AsyncMock()
 
         self.listening_task = self.local_event_loop.create_task(
-            self.ob_data_source.listen_for_order_book_snapshots(self.local_event_loop, msg_queue)
+            self.ob_data_source.listen_for_order_book_snapshots(
+                self.local_event_loop, msg_queue
+            )
         )
 
         msg: OrderBookMessage = await msg_queue.get()
@@ -503,5 +587,8 @@ class TestVertexAPIOrderBookDataSource(IsolatedAsyncioWrapperTestCase):
             await self.ob_data_source._subscribe_channels(mock_ws)
 
         self.assertTrue(
-            self._is_logged("ERROR", "Unexpected error occurred subscribing to trading and order book stream...")
+            self._is_logged(
+                "ERROR",
+                "Unexpected error occurred subscribing to trading and order book stream...",
+            )
         )
