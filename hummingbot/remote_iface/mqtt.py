@@ -777,8 +777,11 @@ class MQTTGateway(Node):
     async def _monitor_health_loop(self):
         while not self._stop_event_async.is_set():
             # Maybe we can include more checks here to determine the health!
-            self._health = await self._ev_loop.run_in_executor(
-                None, self._check_connections)
+            # _check_connections is just local state inspection; keep it synchronous.
+            # Using run_in_executor here can fail during shutdown/restart paths
+            # ("cannot schedule new futures after shutdown") and turns a transient
+            # disconnect into a permanent failure.
+            self._health = self._check_connections()
             if self.health:
                 if not self._initial_connection_succeeded:
                     self._initial_connection_succeeded = True
@@ -809,8 +812,7 @@ class MQTTGateway(Node):
 
             self._restarting = False
 
-            self._health = await self._ev_loop.run_in_executor(
-                None, self._check_connections)
+            self._health = self._check_connections()
 
             if self._health:
                 self._hb_app.logger().warning('MQTT Gateway successfully reconnected.')
@@ -1147,7 +1149,8 @@ class ETopicPublisher:
 
     def send(self, msg: Dict[str, Any]):
         if threading.current_thread() != threading.main_thread():  # pragma: no cover
-            asyncio.get_event_loop().call_soon_threadsafe(self.send, msg)
+            # Schedule onto the Node's loop; a random thread may not have a running loop.
+            self._node._ev_loop.call_soon_threadsafe(self.send, msg)
             return
         self._pub.publish(msg, self._topic)
 
@@ -1173,7 +1176,8 @@ class EMTopicPublisher:
 
     def send(self, topic: str, msg: Dict[str, Any]):
         if threading.current_thread() != threading.main_thread():  # pragma: no cover
-            asyncio.get_event_loop().call_soon_threadsafe(self.send, msg)
+            # Schedule onto the Node's loop; also preserve the `topic` argument.
+            self._node._ev_loop.call_soon_threadsafe(self.send, topic, msg)
             return
         _topic = self._make_topic(topic)
         self._pub.publish(msg, _topic)
