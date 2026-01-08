@@ -29,6 +29,7 @@ class MarketDataProvider:
     gateway_price_provider_by_chain: Dict = {
         "ethereum": "uniswap/router",
         "solana": "jupiter/router",
+        "ton": "dedust/router",
     }
 
     @classmethod
