@@ -775,6 +775,10 @@ class MQTTGateway(Node):
                            loop=self._ev_loop)
 
     async def _monitor_health_loop(self):
+        # Wait for initial connections to establish before monitoring
+        await asyncio.sleep(30)
+        self._hb_app.logger().info('MQTT health monitoring started after initial delay.')
+        
         while not self._stop_event_async.is_set():
             # Maybe we can include more checks here to determine the health!
             # _check_connections is just local state inspection; keep it synchronous.
