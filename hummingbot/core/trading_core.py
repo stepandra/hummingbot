@@ -478,6 +478,13 @@ class TradingCore:
             elif isinstance(strategy_config, dict):
                 self._config_data = strategy_config
 
+            # Wait for gateway to be online before initializing strategy
+            # This ensures gateway connectors are registered in AllConnectorSettings
+            if self._gateway_monitor:
+                self.logger().info("Waiting for gateway to be online before starting strategy...")
+                await self._gateway_monitor.wait_for_online_status()
+                self.logger().info("Gateway is online, proceeding with strategy initialization")
+
             # Initialize strategy based on type
             strategy_type = self.detect_strategy_type(strategy_name)
 
