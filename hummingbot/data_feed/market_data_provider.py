@@ -143,7 +143,7 @@ class MarketDataProvider:
                                     connector=connector_name,
                                     base_asset=base,
                                     quote_asset=quote,
-                                    amount=Decimal("1"),
+                                    amount=Decimal("575"),  # ~$1000 at ~$1.74/TON
                                     side=TradeType.SELL
                                 )
                                 gateway_tasks.append(task)
@@ -165,18 +165,25 @@ class MarketDataProvider:
                                 self.logger().error(f"Error fetching price for {trading_pair}: {rate}")
                             elif rate and "price" in rate:
                                 rate_oracle.set_price(trading_pair, Decimal(rate["price"]))
+                                self.logger().info(f"{connector_pair.connector_name} price: {rate['price']:.6f}")
                     except Exception as e:
                         self.logger().error(f"Error fetching gateway prices: {e}", exc_info=True)
 
-                # Process non-gateway connectors
+                # Process non-gateway connectors - use order book for volume-weighted price
                 for connector, connector_pairs in non_gateway_connectors.items():
                     try:
                         connector_instance = self._non_trading_connectors[connector]
-                        prices = await self._safe_get_last_traded_prices(
-                            connector=connector_instance,
-                            trading_pairs=[pair.trading_pair for pair in connector_pairs])
-                        for pair, rate in prices.items():
-                            rate_oracle.set_price(pair, rate)
+                        for pair_config in connector_pairs:
+                            trading_pair = pair_config.trading_pair
+                            try:
+                                order_book = connector_instance.get_order_book(trading_pair)
+                                # Get bid price for selling ~575 TON ($1000 at ~$1.74)
+                                result = order_book.get_price_for_volume(is_buy=False, volume=575.0)
+                                rate = Decimal(str(result.result_price))
+                                rate_oracle.set_price(trading_pair, rate)
+                                self.logger().info(f"{connector} price: {rate:.6f}")
+                            except Exception as e:
+                                self.logger().warning(f"Order book not ready for {trading_pair}: {e}")
                     except Exception as e:
                         self.logger().error(f"Error fetching prices from {connector}: {e}", exc_info=True)
 
