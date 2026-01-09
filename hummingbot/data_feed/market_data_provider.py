@@ -182,8 +182,18 @@ class MarketDataProvider:
                                 rate = Decimal(str(result.result_price))
                                 rate_oracle.set_price(trading_pair, rate)
                                 self.logger().info(f"{connector} price: {rate:.6f}")
-                            except Exception as e:
-                                self.logger().warning(f"Order book not ready for {trading_pair}: {e}")
+                            except Exception:
+                                # Fallback to last traded price if order book not ready
+                                try:
+                                    prices = await self._safe_get_last_traded_prices(
+                                        connector=connector_instance,
+                                        trading_pairs=[trading_pair])
+                                    if trading_pair in prices:
+                                        rate = prices[trading_pair]
+                                        rate_oracle.set_price(trading_pair, rate)
+                                        self.logger().info(f"{connector} price: {rate:.6f} (last)")
+                                except Exception as e2:
+                                    self.logger().warning(f"Failed to get price for {trading_pair}: {e2}")
                     except Exception as e:
                         self.logger().error(f"Error fetching prices from {connector}: {e}", exc_info=True)
 
