@@ -794,6 +794,8 @@ class MQTTGateway(Node):
                 await asyncio.sleep(self._INTERVAL_HEALTH_CHECK)
             elif self._initial_connection_succeeded and not self._stop_event_async.is_set():
                 await self._restart_gateway()
+            else:
+                await asyncio.sleep(self._INTERVAL_HEALTH_CHECK)
 
     async def _restart_gateway(self):
         self._hb_app.logger().warning('MQTT Gateway is disconnected, attempting to reconnect.')

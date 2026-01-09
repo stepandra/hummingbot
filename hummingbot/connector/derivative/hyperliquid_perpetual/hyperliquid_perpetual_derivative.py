@@ -621,6 +621,14 @@ class HyperliquidPerpetualDerivative(PerpetualDerivativePyBase):
         )
         self._order_tracker.process_order_update(order_update=order_update)
 
+    @staticmethod
+    def _decimal_places(value: Any) -> int:
+        try:
+            dec = Decimal(str(value))
+        except Exception:
+            return 0
+        return max(-dec.as_tuple().exponent, 0)
+
     async def _format_trading_rules(self, exchange_info_dict: List) -> List[TradingRule]:
         """
         Queries the necessary API endpoint and initialize the TradingRule object for each trading pair being traded.
@@ -643,8 +651,12 @@ class HyperliquidPerpetualDerivative(PerpetualDerivativePyBase):
                 trading_pair = await self.trading_pair_associated_to_exchange_symbol(symbol=ex_symbol)
                 step_size = Decimal(str(10 ** -coin_info.get("szDecimals")))
 
-                price_size = Decimal(str(10 ** -len(price_info.get("markPx").split('.')[1])))
-                _min_order_size = Decimal(str(10 ** -len(price_info.get("openInterest").split('.')[1])))
+                mark_px_decimals = self._decimal_places(price_info.get("markPx"))
+                price_size = Decimal("1") if mark_px_decimals == 0 else Decimal(10) ** -mark_px_decimals
+                open_interest_decimals = self._decimal_places(price_info.get("openInterest"))
+                _min_order_size = (
+                    Decimal(10) ** -open_interest_decimals if open_interest_decimals > 0 else step_size
+                )
                 collateral_token = CONSTANTS.CURRENCY
                 return_val.append(
                     TradingRule(
