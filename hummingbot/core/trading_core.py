@@ -583,9 +583,14 @@ class TradingCore:
 
     async def _wait_till_ready(self, func: Callable, *args, **kwargs):
         """Wait until all markets are ready before executing function."""
+        start_time = time.time()
         while True:
             all_ready = all([market.ready for market in self.markets.values()])
             if not all_ready:
+                if time.time() - start_time > 120.0:  # 2 minutes timeout
+                    self.logger().error("Markets did not become ready within 120 seconds. "
+                                        "Check connector configurations and network connectivity.")
+                    return
                 await asyncio.sleep(0.5)
             else:
                 if inspect.iscoroutinefunction(func):
