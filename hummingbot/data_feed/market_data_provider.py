@@ -172,7 +172,12 @@ class MarketDataProvider:
                 # Process non-gateway connectors - use order book for volume-weighted price
                 for connector, connector_pairs in non_gateway_connectors.items():
                     try:
-                        connector_instance = self._non_trading_connectors[connector]
+                        # Prioritize using the existing connector instance (from strategy) if available
+                        # This ensures we have access to the order book if it's being maintained
+                        connector_instance = self.connectors.get(connector)
+                        if not connector_instance:
+                            connector_instance = self._non_trading_connectors[connector]
+
                         for pair_config in connector_pairs:
                             trading_pair = pair_config.trading_pair
                             try:

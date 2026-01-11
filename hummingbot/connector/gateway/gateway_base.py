@@ -14,7 +14,7 @@ from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.connector.gateway.common_types import TransactionStatus
 from hummingbot.connector.gateway.gateway_in_flight_order import GatewayInFlightOrder
 from hummingbot.core.data_type.cancellation_result import CancellationResult
-from hummingbot.core.data_type.common import OrderType, TradeType
+from hummingbot.core.data_type.common import OrderType, PriceType, TradeType
 from hummingbot.core.data_type.in_flight_order import (
     OrderState,
     OrderUpdate,
@@ -24,6 +24,7 @@ from hummingbot.core.data_type.in_flight_order import (
 from hummingbot.core.data_type.limit_order import LimitOrder
 from hummingbot.core.data_type.trade_fee import AddedToCostTradeFee, TokenAmount
 from hummingbot.core.gateway.gateway_http_client import GatewayHttpClient
+from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.network_iterator import NetworkStatus
 from hummingbot.core.utils.async_utils import safe_ensure_future, safe_gather
 from hummingbot.core.utils.tracking_nonce import get_tracking_nonce
@@ -117,6 +118,7 @@ class GatewayBase(ConnectorBase):
         self._amount_quantum_dict = {}
         self._token_data = {}  # Store complete token information
         self._allowances = {}
+        self._trading_rules: Dict[str, TradingRule] = {}
 
     @classmethod
     def logger(cls) -> HummingbotLogger:
@@ -158,6 +160,53 @@ class GatewayBase(ConnectorBase):
         Returns the list of trading pairs supported by this connector.
         """
         return self._trading_pairs
+
+    @property
+    def trading_rules(self) -> Dict[str, TradingRule]:
+        """
+        Returns the trading rules for this connector.
+        For Gateway connectors, we provide default permissive rules.
+        """
+        # Create default trading rules for any pairs not already defined
+        for trading_pair in self._trading_pairs:
+            if trading_pair not in self._trading_rules:
+                # Get token decimals from token_data if available
+                base, quote = trading_pair.split("-")
+                base_decimals = self._token_data.get(base, {}).get("decimals", 9)
+                quote_decimals = self._token_data.get(quote, {}).get("decimals", 6)
+
+                self._trading_rules[trading_pair] = TradingRule(
+                    trading_pair=trading_pair,
+                    min_order_size=Decimal("0.0001"),
+                    max_order_size=Decimal("1000000"),
+                    min_price_increment=Decimal(10) ** -quote_decimals,
+                    min_base_amount_increment=Decimal(10) ** -base_decimals,
+                    min_quote_amount_increment=Decimal(10) ** -quote_decimals,
+                    min_notional_size=Decimal("0.01"),
+                    supports_limit_orders=False,  # AMM doesn't support limit orders
+                    supports_market_orders=True,
+                )
+        return self._trading_rules
+
+    def get_price_by_type(self, trading_pair: str, price_type: PriceType) -> Decimal:
+        """
+        Gets price by type (BestBid, BestAsk, MidPrice or LastTrade).
+        For Gateway AMM connectors, we return the last known price from rate oracle.
+
+        :param trading_pair: The market trading pair
+        :param price_type: The price type
+        :returns The price
+        """
+        from hummingbot.core.rate_oracle.rate_oracle import RateOracle
+        rate_oracle = RateOracle.get_instance()
+
+        # Try to get price from rate oracle (set by market_data_provider)
+        price = rate_oracle.get_pair_rate(trading_pair)
+        if price and price > s_decimal_0:
+            return price
+
+        # Fallback: return NaN if no price available
+        return Decimal("nan")
 
     async def all_trading_pairs(self) -> List[str]:
         """
@@ -603,15 +652,37 @@ class GatewayBase(ConnectorBase):
                 )
                 continue
 
-            if "signature" not in tx_details:
+            # Support both 'signature' (Solana/EVM) and 'txHash' (TON) response formats
+            if "signature" not in tx_details and "txHash" not in tx_details:
                 self.logger().error(
-                    f"No signature field for transaction status of {tracked_order.client_order_id}: "
+                    f"No signature/txHash field for transaction status of {tracked_order.client_order_id}: "
                     f"{tx_details}."
                 )
                 continue
 
-            tx_status: int = tx_details["txStatus"]
+            # Handle TON-style response (confirmed/success booleans) vs EVM/Solana-style (txStatus int)
+            if "txStatus" in tx_details:
+                tx_status: int = tx_details["txStatus"]
+            elif "confirmed" in tx_details and "success" in tx_details:
+                # TON gateway returns confirmed=True/False and success=True/False
+                if tx_details.get("confirmed") and tx_details.get("success"):
+                    tx_status = TransactionStatus.CONFIRMED.value
+                elif tx_details.get("confirmed") and not tx_details.get("success"):
+                    tx_status = TransactionStatus.FAILED.value
+                else:
+                    tx_status = TransactionStatus.PENDING.value
+            else:
+                self.logger().warning(
+                    f"Unknown transaction status format for {tracked_order.client_order_id}: {tx_details}"
+                )
+                continue
+
             fee = tx_details.get("fee", 0)
+            # For TON, try to extract fee from receipt if available
+            if fee == 0 and "receipt" in tx_details:
+                receipt = tx_details.get("receipt", {})
+                if isinstance(receipt, dict):
+                    fee = int(receipt.get("total_fees", 0)) / 1e9  # Convert nanoTON to TON
 
             # Chain-specific check for transaction success
             if tx_status == TransactionStatus.CONFIRMED.value:
@@ -737,7 +808,7 @@ class GatewayBase(ConnectorBase):
                     self.chain, self.network, transaction_hash
                 )
 
-                if "signature" not in tx_details:
+                if "signature" not in tx_details and "txHash" not in tx_details:
                     self.logger().error(
                         f"No signature field for transaction status of {order_id}: {tx_details}"
                     )
@@ -863,12 +934,12 @@ class GatewayBase(ConnectorBase):
                 amount=str(amount) if amount else None,
             )
 
-            if "signature" not in approve_result:
+            if "signature" not in approve_result and "txHash" not in approve_result:
                 raise Exception(
                     f"No transaction hash returned from approval: {approve_result}"
                 )
 
-            transaction_hash = approve_result["signature"]
+            transaction_hash = approve_result.get("signature") or approve_result.get("txHash")
 
             # Start tracking the approval order
             self.start_tracking_order(
