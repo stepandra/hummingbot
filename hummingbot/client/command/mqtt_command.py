@@ -74,7 +74,10 @@ class MQTTCommand:
                         self.logger().error(
                             f'Failed to connect MQTT Bridge: {str(e)}')
                         self.notify('MQTT Bridge failed to connect to the broker.')
-                    self._mqtt.stop()
+                    try:
+                        self._mqtt.stop()
+                    except Exception as stop_error:
+                        self.logger().warning(f"MQTT Bridge stop failed after connect error: {stop_error}")
                     self._mqtt = None
 
                     if self.client_config_map.mqtt_bridge.mqtt_autostart:
